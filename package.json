@@ -1,0 +1,23 @@
+{
+  "name": "folder-wiki",
+  "version": "1.0.0",
+  "description": "A self-fed local wiki where folders are articles and files are their sources.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --check server.mjs && node --check public/app.js && node --test"
+  },
+  "homepage": "https://github.com/deRedfish/folder-wiki#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deRedfish/folder-wiki.git"
+  },
+  "bugs": {
+    "url": "https://github.com/deRedfish/folder-wiki/issues"
+  }
+}

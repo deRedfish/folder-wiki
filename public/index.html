@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#17130f">
+  <title>Folder Wiki</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand" data-action="home" tabindex="0">
+        <div class="brand-mark">F</div>
+        <div><strong>Folder Wiki</strong><span>Self-fed knowledge base</span></div>
+      </div>
+      <button class="search-trigger" data-action="search"><span>⌕</span> Search the wiki <kbd>Ctrl K</kbd></button>
+      <nav class="primary-nav">
+        <button data-action="home" class="active"><span>⌂</span> Overview</button>
+        <button data-action="all"><span>☷</span> All entries</button>
+        <button data-action="pinned"><span>◇</span> Pinned</button>
+        <button data-action="gm"><span>⚄</span> GM screen</button>
+      </nav>
+      <div class="nav-heading"><span>Content</span><button title="Collapse folders" data-action="collapse">−</button></div>
+      <div class="file-tree" id="file-tree"></div>
+      <button class="new-page" data-action="new">＋ New page</button>
+      <div class="sidebar-footer"><span class="status-dot"></span><span id="library-status">Reading library…</span></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-button mobile-only" data-action="menu" aria-label="Open menu">☰</button>
+        <div class="breadcrumbs" id="breadcrumbs">Wiki / Overview</div>
+        <div class="top-actions">
+          <button class="icon-button" data-action="random" title="Random entry">⚄</button>
+          <button class="button ghost hidden" id="edit-button" data-action="edit">Edit page</button>
+          <button class="button" data-action="new">＋ Add entry</button>
+        </div>
+      </header>
+      <div id="view" class="view"></div>
+    </main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="search-modal">
+    <section class="search-modal" role="dialog" aria-modal="true" aria-label="Search wiki">
+      <div class="search-box"><span>⌕</span><input id="search-input" autocomplete="off" placeholder="Search titles, articles, PDFs…"><kbd>Esc</kbd></div>
+      <div id="search-results" class="search-results"><div class="search-empty">Start typing to search titles and full document text.</div></div>
+      <footer><span>↑↓ Navigate</span><span>Enter Open</span><span>Search includes PDF text when pdftotext is available</span></footer>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
