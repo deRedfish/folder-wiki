@@ -75,7 +75,8 @@ async function buildIndex(force = false) {
   if (!force && Date.now() - cache.at < 2000) return cache;
   const [paths, folders] = await Promise.all([walk(CONTENT_ROOT), walkFolders(CONTENT_ROOT)]);
   const pdfQueue = [];
-  const records = await Promise.all(paths.map(async (file) => {
+  const articlePaths = paths.filter((file) => path.dirname(file) !== CONTENT_ROOT);
+  const records = await Promise.all(articlePaths.map(async (file) => {
     const info = await stat(file);
     const ext = path.extname(file).toLowerCase();
     let searchable;
@@ -91,7 +92,7 @@ async function buildIndex(force = false) {
       path: rel,
       name: path.basename(file),
       title: searchable.title,
-      folder: path.posix.dirname(rel) === "." ? "Library" : path.posix.dirname(rel),
+      folder: path.posix.dirname(rel),
       type: TEXT_TYPES.has(ext) ? "markdown" : ext === ".pdf" ? "pdf" : IMAGE_TYPES.has(ext) ? "image" : "archive",
       ext: ext.slice(1), size: info.size, modified: info.mtime.toISOString(),
       _content: searchable.content, _lower: searchable.lower
@@ -142,8 +143,8 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     if (url.pathname === "/api/health" && req.method === "GET") return json(res, { ok: true });
-    if (url.pathname === "/api/files" && req.method === "GET") return json(res, (await buildIndex()).files);
-    if (url.pathname === "/api/folders" && req.method === "GET") return json(res, (await buildIndex()).folders);
+    if (url.pathname === "/api/files" && req.method === "GET") return json(res, (await buildIndex(url.searchParams.has("refresh"))).files);
+    if (url.pathname === "/api/folders" && req.method === "GET") return json(res, (await buildIndex(url.searchParams.has("refresh"))).folders);
     if (url.pathname === "/api/search" && req.method === "GET") {
       const q = (url.searchParams.get("q") || "").trim().toLocaleLowerCase();
       if (!q) return json(res, []);

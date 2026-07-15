@@ -1,6 +1,5 @@
 node_modules/
-content/**
-!content/.gitkeep
+content/
 .env
 *.log
 .DS_Store

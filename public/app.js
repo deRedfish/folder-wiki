@@ -172,7 +172,8 @@ function updatePreview() { $("#editor-preview").innerHTML = renderMarkdown($("#e
 async function savePage() {
   let path = $("#editor-path").value.trim().replaceAll("\\", "/"); if (!/\.md$/i.test(path)) path += ".md";
   if (!path || path.startsWith("/") || path.includes("..")) return toast("Choose a safe path inside the content folder");
-  try { await api("/api/file", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ path, content: $("#editor-text").value }) }); await loadFiles(); toast("Page saved"); const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "Library"; navigate(`#article/${encodeURIComponent(folder)}`); }
+  if (!path.includes("/")) return toast("Pages must be placed inside an article folder");
+  try { await api("/api/file", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ path, content: $("#editor-text").value }) }); await loadFiles(true); toast("Page saved"); const folder = path.slice(0, path.lastIndexOf("/")); navigate(`#article/${encodeURIComponent(folder)}`); }
   catch (error) { toast(error.message); }
 }
 
@@ -212,6 +213,7 @@ function openImage(src, title) {
 }
 async function route() {
   const hash = location.hash || "#home"; const [routeName, encoded] = hash.slice(1).split("/");
+  if (["home", "article", "folder", "file", "all", "pinned"].includes(routeName)) await loadFiles(true);
   if (routeName === "article" || routeName === "folder") return openArticle(decodeURIComponent(encoded || ""));
   if (routeName === "file") { const file = state.files.find((item) => item.path === decodeURIComponent(encoded || "")); return file ? openArticle(file.folder) : renderNotFound(); }
   if (routeName === "all") return renderList("All articles", state.articles);
@@ -220,7 +222,7 @@ async function route() {
   if (routeName === "new") return renderEditor();
   renderHome();
 }
-async function loadFiles() { state.files = await api("/api/files"); state.folderPaths = await api("/api/folders"); buildArticles(); buildTree(); }
+async function loadFiles(refresh = false) { const suffix = refresh ? "?refresh=1" : ""; state.files = await api(`/api/files${suffix}`); state.folderPaths = await api(`/api/folders${suffix}`); buildArticles(); buildTree(); }
 
 document.addEventListener("click", async (event) => {
   const articleNode = event.target.closest("[data-article]"); if (articleNode) { closeSearch(); return navigate(`#article/${encodeURIComponent(articleNode.dataset.article)}`); }

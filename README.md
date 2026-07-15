@@ -45,7 +45,7 @@ Open <http://127.0.0.1:4173>.
 
 ## Feed the wiki
 
-All user material belongs under `content/`. The repository intentionally starts with that directory empty.
+All user material belongs under `content/`. The directory and everything inside it are Git-ignored; the server creates it automatically when needed.
 
 ```text
 content/
@@ -69,14 +69,14 @@ This produces:
 - **Places**, containing its Markdown and image gallery
 - **Rules**, containing an embedded PDF
 
-Only files directly inside a folder appear in that folder's article. A subfolder's files stay in the child article. Folder names become article titles; hyphens and underscores are displayed as spaces.
+Only files directly inside a folder appear in that folder's article. A subfolder's files stay in the child article. Folder names become article titles; hyphens and underscores are displayed as spaces. Files placed directly in `content/` are ignored because every article must have its own folder.
 
 You can add content in two ways:
 
 1. Copy, move, or edit files inside `content/` with your normal tools.
 2. Use **Add entry** in the web interface to create a Markdown file. Paths entered there are relative to `content/`, for example `People/Allies/New Ally.md`.
 
-Filesystem changes are picked up automatically, normally within two seconds. Your content is ignored by Git by default, so publishing updates to the wiki engine does not accidentally publish your private library.
+Filesystem changes are refreshed before an article opens and normally within two seconds for search and lists. Your entire `content/` directory is ignored by Git, so publishing updates to the wiki engine does not accidentally publish your private library.
 
 ## Supported files
 
@@ -132,7 +132,7 @@ Only expose Folder Wiki on a trusted network. The browser editor can create and 
 
 ## Backups
 
-There is no proprietary data format. Back up the `content/` directory with your preferred filesystem, sync, or version-control tool. To version your own content in this repository, change the `content/**` rules in `.gitignore`, or keep the content directory in a separate private repository.
+There is no proprietary data format. Back up the `content/` directory with your preferred filesystem, sync, or version-control tool. To version your own content, remove the `content/` rule from `.gitignore` or keep the directory in a separate private repository.
 
 ## Development
 
