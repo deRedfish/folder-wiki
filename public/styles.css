@@ -156,8 +156,10 @@ h1,h2,h3,h4 { font-family:"Libre Caslon Text",Georgia,serif; }
 .list-row:hover { background:#efe9dd; }
 .list-title { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .list-path,.list-date { color:var(--muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.editor-layout { display:grid; grid-template-columns:1fr 1fr; min-height:calc(100vh - 220px); border:1px solid var(--line); border-radius:8px; overflow:hidden; background:white; }
-.editor-pane { display:flex; flex-direction:column; min-width:0; }
+.view.editor-view { height:calc(100vh - 68px); height:calc(100dvh - 68px); min-height:600px; display:flex; flex-direction:column; padding-bottom:28px; }
+.editor-view .document-header { flex:none; margin-bottom:22px; padding-bottom:16px; }
+.editor-layout { flex:1; min-height:320px; display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:white; }
+.editor-pane { display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; }
 .editor-pane + .editor-pane { border-left:1px solid var(--line); }
 .editor-label { display:flex; justify-content:space-between; gap:12px; background:#eae4d8; border-bottom:1px solid var(--line); padding:9px 13px; font-size:11px; text-transform:uppercase; letter-spacing:.12em; }
 .editor-label span { color:var(--muted); font-size:9px; letter-spacing:.04em; text-transform:none; }
@@ -168,7 +170,7 @@ h1,h2,h3,h4 { font-family:"Libre Caslon Text",Georgia,serif; }
 .markdown-toolbar .md-bold { font-weight:800; }
 .markdown-toolbar .md-italic { font-family:Georgia,serif; font-style:italic; }
 .markdown-toolbar .md-format { margin-left:auto; border-color:#bba98e; background:#ebe3d7; color:var(--gold-dark); }
-.editor-code-wrap { position:relative; flex:1; min-height:480px; overflow:hidden; background:#fffdf9; }
+.editor-code-wrap { position:relative; flex:1; min-height:0; overflow:hidden; background:#fffdf9; }
 .editor-highlight,.editor-text { position:absolute; inset:0; width:100%; height:100%; margin:0; padding:20px; border:0; overflow:auto; white-space:pre-wrap; overflow-wrap:break-word; tab-size:2; font:14px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace; }
 .editor-highlight { z-index:1; pointer-events:none; color:#342f29; background:transparent; scrollbar-color:transparent transparent; }
 .editor-highlight::-webkit-scrollbar-track,.editor-highlight::-webkit-scrollbar-thumb { background:transparent; }
@@ -187,7 +189,7 @@ h1,h2,h3,h4 { font-family:"Libre Caslon Text",Georgia,serif; }
 .md-token-del { color:#be185d; }
 .md-token-quote { color:#087f8c; }
 .md-token-rule { color:#e11d48; }
-.editor-preview { overflow:auto; padding:5px 25px 30px; }
+.editor-preview { min-height:0; overflow:auto; padding:5px 25px 30px; }
 .editor-actions { margin-top:12px; display:flex; justify-content:flex-end; gap:8px; }
 .admin-login { width:min(480px,100%); margin:8vh auto 0; padding:30px; border:1px solid var(--line); border-radius:9px; background:#fbf9f4; box-shadow:var(--shadow); }
 .admin-login h1 { margin:8px 0; }

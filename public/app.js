@@ -50,6 +50,7 @@ async function submitAuth() {
   catch (error) { const node = $("#auth-error"); node.textContent = error.message; node.classList.remove("hidden"); }
 }
 function setChrome(label, editable = false) {
+  view.classList.remove("editor-view");
   $("#breadcrumbs").textContent = `Wiki / ${label}`;
   $("#edit-button").classList.toggle("hidden", !editable);
   $$(".primary-nav button").forEach((button) => button.classList.remove("active"));
@@ -198,6 +199,7 @@ async function openArticle(path) {
 function renderEditor(file = null) {
   if (!state.user?.isAdmin) return navigate("#home");
   const isEdit = Boolean(file); setChrome(isEdit ? `Editing ${file.path}` : "New page");
+  view.classList.add("editor-view");
   const initial = isEdit ? state.content : "# New page\n\nStart writing here. Use Markdown headings to keep longer articles easy to navigate.\n";
   const tool = (command, label, title, className = "") => `<button type="button" class="${className}" data-md-command="${command}" title="${title}" aria-label="${title}">${label}</button>`;
   const toolbar = `${tool("bold", "B", "Bold (Ctrl+B)", "md-bold")}${tool("italic", "I", "Italic (Ctrl+I)", "md-italic")}${[1, 2, 3, 4].map((level) => tool(`heading-${level}`, `H${level}`, `Heading level ${level} (Ctrl+Alt+${level})`)).join("")}${tool("link", "↗", "Link with optional title (Ctrl+K)")}${tool("quote", "❯", "Block quote")}${tool("bullet", "• List", "Bulleted list")}${tool("number", "1. List", "Numbered list")}${tool("code", "</>", "Inline code")}${tool("rule", "—", "Horizontal rule")}${tool("format", "Format", "Format Markdown (Ctrl+Shift+F)", "md-format")}`;
