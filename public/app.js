@@ -1,4 +1,5 @@
 import { prettifyMarkdown } from "./editor-utils.mjs";
+import { filesInFolder, folderSelectionStatus } from "./admin-utils.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -366,7 +367,18 @@ function adminPreviewUrl(file) { return `/api/admin/preview?path=${encodeURIComp
 function adminFileRows() { return $$("[data-admin-file-row]").map((row) => row.dataset.adminFileRow); }
 function syncAdminSelection() {
   $$("[data-admin-file-row]").forEach((row) => { const selected = state.adminSelection.has(row.dataset.adminFileRow); row.classList.toggle("is-selected", selected); row.setAttribute("aria-selected", selected); });
+  $$("[data-admin-folder-selection]").forEach((button) => {
+    const folder = button.dataset.adminFolderSelection; const paths = filesInFolder(state.adminFiles, folder); const status = folderSelectionStatus(state.adminFiles, folder, state.adminSelection);
+    const selecting = status !== "all"; button.classList.toggle("is-partial", status === "some"); button.classList.toggle("is-all", status === "all"); button.disabled = !paths.length;
+    button.setAttribute("aria-pressed", status === "all" ? "true" : "false"); button.setAttribute("aria-label", `${selecting ? "Select" : "Deselect"} all ${paths.length} files in ${folder}`); button.title = `${selecting ? "Select" : "Deselect"} this folder and all subfolders`;
+    button.querySelector("span").textContent = status === "all" ? "✓" : status === "some" ? "−" : "";
+  });
   const count = $("#admin-selection-count"); if (count) count.textContent = `${state.adminSelection.size} selected`;
+}
+function toggleAdminFolderSelection(folder) {
+  const paths = filesInFolder(state.adminFiles, folder); const allSelected = paths.length && paths.every((path) => state.adminSelection.has(path));
+  paths.forEach((path) => allSelected ? state.adminSelection.delete(path) : state.adminSelection.add(path));
+  state.adminAnchor = null; syncAdminSelection();
 }
 function selectAdminRow(path, event) {
   const order = adminFileRows(); const additive = event.ctrlKey || event.metaKey;
@@ -403,8 +415,8 @@ function renderAdminManager() {
     return `<div class="admin-file ${file.visible ? "" : "is-hidden"} ${selected ? "is-selected" : ""}" data-admin-file-row="${esc(file.path)}" style="--depth:${depth}" tabindex="0" role="option" aria-selected="${selected}">${preview}<span class="admin-file-name"><strong>${esc(file.name)}</strong><small>${esc(file.path)}</small></span><label class="visibility-toggle"><input type="checkbox" data-admin-visible="${esc(file.path)}" ${file.visible ? "checked" : ""}><span>Visible</span></label></div>`;
   };
   const branch = (node, depth = 0) => {
-    const collapsed = state.adminCollapsed.has(node.path); const hasChildren = node.folders.length || node.files.length;
-    return `<section class="admin-folder-node"><button class="admin-folder-row" data-admin-folder="${esc(node.path)}" style="--depth:${depth}" aria-expanded="${!collapsed}"><span class="admin-folder-chevron">${hasChildren ? (collapsed ? "▶" : "▼") : "·"}</span><span class="admin-folder-icon">▱</span><strong>${esc(node.name)}</strong><small>${node.files.length} file${node.files.length === 1 ? "" : "s"}</small></button><div class="admin-children ${collapsed ? "is-collapsed" : ""}">${node.folders.map((child) => branch(child, depth + 1)).join("")}${node.files.map((file) => fileRow(file, depth + 1)).join("")}</div></section>`;
+    const collapsed = state.adminCollapsed.has(node.path); const hasChildren = node.folders.length || node.files.length; const descendantPaths = filesInFolder(state.adminFiles, node.path); const selectionStatus = folderSelectionStatus(state.adminFiles, node.path, state.adminSelection); const selectAction = selectionStatus === "all" ? "Deselect" : "Select";
+    return `<section class="admin-folder-node"><div class="admin-folder-row" style="--depth:${depth}"><button class="admin-folder-main" data-admin-folder="${esc(node.path)}" aria-expanded="${!collapsed}"><span class="admin-folder-chevron">${hasChildren ? (collapsed ? "▶" : "▼") : "·"}</span><span class="admin-folder-icon">▱</span><strong>${esc(node.name)}</strong><small>${descendantPaths.length} file${descendantPaths.length === 1 ? "" : "s"}</small></button><button class="admin-folder-select ${selectionStatus === "all" ? "is-all" : selectionStatus === "some" ? "is-partial" : ""}" data-admin-folder-selection="${esc(node.path)}" aria-pressed="${selectionStatus === "all"}" aria-label="${selectAction} all ${descendantPaths.length} files in ${esc(node.path)}" title="${selectAction} this folder and all subfolders" ${descendantPaths.length ? "" : "disabled"}><span>${selectionStatus === "all" ? "✓" : selectionStatus === "some" ? "−" : ""}</span></button></div><div class="admin-children ${collapsed ? "is-collapsed" : ""}">${node.folders.map((child) => branch(child, depth + 1)).join("")}${node.files.map((file) => fileRow(file, depth + 1)).join("")}</div></section>`;
   };
   const visible = state.adminFiles.filter((file) => file.visible).length;
   const role = state.adminRoles.find((item) => item.id === state.adminRoleId);
@@ -512,6 +524,8 @@ document.addEventListener("click", async (event) => {
   const imageNode = event.target.closest("[data-image]"); if (imageNode) return openImage(imageNode.dataset.image, imageNode.dataset.imageTitle);
   const treeToggle = event.target.closest(".tree-toggle"); if (treeToggle) return treeToggle.closest(".tree-folder").classList.toggle("closed");
   if (event.target.closest(".visibility-toggle")) return;
+  const adminFolderSelection = event.target.closest("[data-admin-folder-selection]");
+  if (adminFolderSelection) return toggleAdminFolderSelection(adminFolderSelection.dataset.adminFolderSelection);
   const adminFolder = event.target.closest("[data-admin-folder]");
   if (adminFolder) { const path = adminFolder.dataset.adminFolder; state.adminCollapsed.has(path) ? state.adminCollapsed.delete(path) : state.adminCollapsed.add(path); return renderAdminManager(); }
   const adminRow = event.target.closest("[data-admin-file-row]");
