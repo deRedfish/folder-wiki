@@ -32,10 +32,25 @@ test("role visibility filters viewers while admins bypass restrictions", async (
   assert.deepEqual(await fetch(`${base}/api/search?q=hidden`, withSession(viewer.cookie)).then((response) => response.json()), []);
   assert.equal((await fetch(`${base}/api/file?path=${encodeURIComponent("Article/secret.md")}`, withSession(viewer.cookie))).status, 404);
   assert.equal((await fetch(`${base}/content/Article/secret.md`, withSession(viewer.cookie))).status, 404);
+  assert.equal((await fetch(`${base}/api/file`, withSession(viewer.cookie, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "Article/new.md", content: "No" }) }))).status, 403);
 
   const adminFiles = await fetch(`${base}/api/files?refresh=1`, withSession(admin.cookie)).then((response) => response.json());
   assert.equal(adminFiles.find((file) => file.path === "Article/secret.md").viewerVisible, false);
   assert.equal((await fetch(`${base}/api/file?path=${encodeURIComponent("Article/secret.md")}`, withSession(admin.cookie))).status, 200);
   const preview = await fetch(`${base}/api/admin/preview?path=${encodeURIComponent("Article/portrait.png")}`, withSession(admin.cookie));
   assert.equal(preview.status, 200); assert.equal(preview.headers.get("content-type"), "image/png");
+
+  const gnome = await fetch(`${base}/api/admin/roles`, withSession(admin.cookie, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Gnome", isAdmin: false }) })).then((response) => response.json());
+  await fetch(`${base}/api/admin/visibility`, withSession(admin.cookie, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ roleId: gnome.id, paths: ["Article/secret.md"], visible: true }) }));
+  const updateViewer = await fetch(`${base}/api/admin/users/${viewer.user.id}`, withSession(admin.cookie, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "adamplayer", password: "", roleIds: [playerRole.id, gnome.id] }) }));
+  assert.equal(updateViewer.status, 200);
+  const cumulative = await fetch(`${base}/api/files?refresh=1`, withSession(viewer.cookie)).then((response) => response.json());
+  assert.deepEqual(cumulative.map((file) => file.path), ["Article/portrait.png", "Article/public.md", "Article/secret.md"]);
+
+  const created = await fetch(`${base}/api/admin/users`, withSession(admin.cookie, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "createduser", password: "temporary password", roleIds: [playerRole.id] }) })).then((response) => response.json());
+  assert.equal(created.roles[0].name, "Player"); assert.ok(created.joinedAt);
+  assert.equal((await fetch(`${base}/api/admin/users/${created.id}`, withSession(admin.cookie, { method: "DELETE" }))).status, 200);
+  assert.equal((await fetch(`${base}/api/admin/roles/${gnome.id}`, withSession(admin.cookie, { method: "DELETE" }))).status, 200);
+  const afterRoleDelete = await fetch(`${base}/api/files?refresh=1`, withSession(viewer.cookie)).then((response) => response.json());
+  assert.deepEqual(afterRoleDelete.map((file) => file.path), ["Article/portrait.png", "Article/public.md"]);
 });

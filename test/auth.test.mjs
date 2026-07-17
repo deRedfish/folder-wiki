@@ -25,4 +25,12 @@ test("users, sessions, roles, and cumulative file grants", async (context) => {
   await auth.updateUser(player.id, { username: "adam", roleIds: [player.roles[0].id, gnome.id] });
   assert.deepEqual([...auth.visiblePaths(player.id)].sort(), ["Lore/gnome.md", "Lore/public.md"]);
   assert.equal(auth.visiblePaths(gm.id), null);
+
+  const playerRole = auth.listRoles().find((role) => role.systemKey === "player");
+  const gmRole = auth.listRoles().find((role) => role.systemKey === "gm");
+  auth.updateRole(playerRole.id, { name: "Adventurer", isAdmin: false });
+  const laterSignup = await auth.register("laterplayer", "a third secure password");
+  assert.deepEqual(laterSignup.roles.map((role) => role.name), ["Adventurer"]);
+  assert.throws(() => auth.deleteRole(playerRole.id), /Default Player and GM roles/);
+  assert.throws(() => auth.updateRole(gmRole.id, { name: "GM", isAdmin: false }), /permission types/);
 });
