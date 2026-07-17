@@ -1,7 +1,9 @@
+import { prettifyMarkdown } from "./editor-utils.mjs";
+
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const view = $("#view");
-const state = { files: [], folderPaths: [], articles: [], current: null, currentFile: null, content: "", searchResults: [], selectedResult: 0 };
+const state = { files: [], folderPaths: [], articles: [], current: null, currentFile: null, content: "", searchResults: [], selectedResult: 0, adminFiles: [], adminSelection: new Set(), adminCollapsed: new Set(), adminAnchor: null };
 const icons = { markdown: "▤", pdf: "▥", image: "▧", archive: "⬡" };
 const esc = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 const contentUrl = (file) => `/content/${file.split("/").map(encodeURIComponent).join("/")}`;
@@ -150,7 +152,10 @@ async function openArticle(path) {
     }));
     if (isEditable) { state.currentFile = editableFiles[0]; state.content = loaded.find((item) => item.file.path === editableFiles[0].path)?.content || ""; }
     const childNav = article.children.length ? `<section class="child-articles"><div class="section-kicker">Sub-articles</div><div class="child-grid">${article.children.map((child) => `<article class="child-card" data-article="${esc(child.path)}"><span>▱</span><div><strong>${esc(child.title)}</strong><small>${child.files.length} sources · ${child.children.length} children</small></div><b>→</b></article>`).join("")}</div></section>` : "";
-    const markdown = loaded.map((item) => `<section class="article-source prose">${textFiles.length > 1 ? `<div class="source-label">Source · ${esc(item.file.name)}</div>` : ""}${item.html}</section>`).join("");
+    const markdown = loaded.map((item) => {
+      const canEdit = ["md", "markdown"].includes(item.file.ext);
+      return `<section class="article-source prose"><div class="source-toolbar"><div class="source-label">Source · ${esc(item.file.name)}</div>${canEdit ? `<button class="source-edit" data-edit-file="${esc(item.file.path)}">Edit source</button>` : ""}</div>${item.html}</section>`;
+    }).join("");
     const pdfs = article.files.filter((file) => file.type === "pdf").map((file) => `<details class="embedded-source" open><summary><span>▥</span><strong>${esc(file.title)}</strong><a href="${contentUrl(file.path)}" target="_blank" title="Open PDF in a new tab">Open separately ↗</a></summary><iframe class="media-view embedded-pdf" loading="lazy" src="${contentUrl(file.path)}" title="${esc(file.title)}"></iframe></details>`).join("");
     const images = article.files.filter((file) => file.type === "image");
     const gallery = images.length ? `<section class="article-gallery"><div class="section-kicker">Images · ${images.length}</div><div class="image-grid ${images.length === 1 ? "single" : ""}">${images.map((file) => `<figure data-image="${contentUrl(file.path)}" data-image-title="${esc(file.title)}"><img loading="lazy" src="${contentUrl(file.path)}" alt="${esc(file.title)}"><figcaption>${esc(file.title)}</figcaption></figure>`).join("")}</div></section>` : "";
@@ -165,10 +170,134 @@ async function openArticle(path) {
 function renderEditor(file = null) {
   const isEdit = Boolean(file); setChrome(isEdit ? `Editing ${file.path}` : "New page");
   const initial = isEdit ? state.content : "# New page\n\nStart writing here. Use Markdown headings to keep longer articles easy to navigate.\n";
-  view.innerHTML = `<div class="document-header"><div class="eyebrow">Markdown editor</div><h1>${isEdit ? "Edit entry" : "Create an entry"}</h1><input id="editor-path" class="editor-path" value="${esc(isEdit ? file.path : "Notes/New Page.md")}" ${isEdit ? "readonly" : ""}></div><div class="editor-layout"><section class="editor-pane"><div class="editor-label">Markdown</div><textarea class="editor-text" id="editor-text" spellcheck="true"></textarea></section><section class="editor-pane"><div class="editor-label">Preview</div><div class="editor-preview prose" id="editor-preview"></div></section></div><div class="editor-actions"><button class="button ghost" data-action="cancel-edit">Cancel</button><button class="button" data-action="save">Save page</button></div>`;
-  $("#editor-text").value = initial; updatePreview(); $("#editor-text").addEventListener("input", updatePreview);
+  const tool = (command, label, title, className = "") => `<button type="button" class="${className}" data-md-command="${command}" title="${title}" aria-label="${title}">${label}</button>`;
+  const toolbar = `${tool("bold", "B", "Bold (Ctrl+B)", "md-bold")}${tool("italic", "I", "Italic (Ctrl+I)", "md-italic")}${[1, 2, 3, 4].map((level) => tool(`heading-${level}`, `H${level}`, `Heading level ${level} (Ctrl+Alt+${level})`)).join("")}${tool("link", "↗", "Link with optional title (Ctrl+K)")}${tool("quote", "❯", "Block quote")}${tool("bullet", "• List", "Bulleted list")}${tool("number", "1. List", "Numbered list")}${tool("code", "</>", "Inline code")}${tool("rule", "—", "Horizontal rule")}${tool("format", "Format", "Format Markdown (Ctrl+Shift+F)", "md-format")}`;
+  view.innerHTML = `<div class="document-header"><div class="eyebrow">Markdown editor</div><h1>${isEdit ? "Edit entry" : "Create an entry"}</h1><input id="editor-path" class="editor-path" value="${esc(isEdit ? file.path : "Notes/New Page.md")}" ${isEdit ? "readonly" : ""}></div><div class="editor-layout"><section class="editor-pane"><div class="editor-label">Markdown <span>Ctrl+S to save</span></div><div class="markdown-toolbar" role="toolbar" aria-label="Markdown formatting">${toolbar}</div><div class="editor-code-wrap"><pre class="editor-highlight" id="editor-highlight" aria-hidden="true"><code></code></pre><textarea class="editor-text" id="editor-text" spellcheck="true" aria-label="Markdown source"></textarea></div></section><section class="editor-pane"><div class="editor-label">Preview</div><div class="editor-preview prose" id="editor-preview"></div></section></div><div class="editor-actions"><button class="button ghost" data-action="cancel-edit">Cancel</button><button class="button" data-action="save">Save page</button></div>`;
+  const editor = $("#editor-text"); editor.value = initial; updateEditor();
+  editor.addEventListener("input", updateEditor);
+  editor.addEventListener("scroll", syncEditorScroll);
+  editor.addEventListener("keydown", handleEditorKeydown);
 }
-function updatePreview() { $("#editor-preview").innerHTML = renderMarkdown($("#editor-text").value).html; }
+function highlightInlineMarkdown(text) {
+  const pattern = /(`[^`\n]+`|!\[[^\]\n]*\]\([^\)\n]*\)|\[[^\]\n]+\]\([^\)\n]*\)|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|\*[^*\n]+\*|_[^_\n]+_)/g;
+  return text.split(pattern).map((token) => {
+    if (/^`/.test(token)) return `<span class="md-token-code">${esc(token)}</span>`;
+    if (/^!?\[/.test(token)) return `<span class="md-token-link">${esc(token)}</span>`;
+    if (/^(\*\*|__)/.test(token)) return `<span class="md-token-strong">${esc(token)}</span>`;
+    if (/^(\*|_)/.test(token)) return `<span class="md-token-em">${esc(token)}</span>`;
+    if (/^~~/.test(token)) return `<span class="md-token-del">${esc(token)}</span>`;
+    return esc(token);
+  }).join("");
+}
+function highlightMarkdown(source) {
+  let fenced = false;
+  return source.replace(/\r/g, "").split("\n").map((line) => {
+    if (/^\s*```/.test(line)) { fenced = !fenced; return `<span class="md-token-fence">${esc(line)}</span>`; }
+    if (fenced) return `<span class="md-token-codeblock">${esc(line)}</span>`;
+    const heading = line.match(/^(\s*)(#{1,6})(\s+)(.*)$/);
+    if (heading) return `${esc(heading[1])}<span class="md-token-marker">${esc(heading[2])}</span>${esc(heading[3])}<span class="md-token-heading md-token-heading-${heading[2].length}">${highlightInlineMarkdown(heading[4])}</span>`;
+    if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line)) return `<span class="md-token-rule">${esc(line)}</span>`;
+    const prefix = line.match(/^(\s*)(>\s+|[-+*]\s+|\d+[.)]\s+)(.*)$/);
+    if (prefix) { const tokenClass = prefix[2].trim().startsWith(">") ? "md-token-quote" : ""; return `${esc(prefix[1])}<span class="md-token-marker">${esc(prefix[2])}</span><span class="${tokenClass}">${highlightInlineMarkdown(prefix[3])}</span>`; }
+    return highlightInlineMarkdown(line);
+  }).join("\n") + " ";
+}
+function syncEditorScroll() { const editor = $("#editor-text"), highlight = $("#editor-highlight"); if (editor && highlight) { highlight.scrollTop = editor.scrollTop; highlight.scrollLeft = editor.scrollLeft; } }
+function updateEditor() {
+  const editor = $("#editor-text"); if (!editor) return;
+  $("#editor-preview").innerHTML = renderMarkdown(editor.value).html;
+  $("#editor-highlight code").innerHTML = highlightMarkdown(editor.value);
+  syncEditorScroll();
+}
+function replaceEditorText(start, end, replacement, selectionStart, selectionEnd) {
+  const editor = $("#editor-text"); editor.setRangeText(replacement, start, end, "end");
+  editor.setSelectionRange(selectionStart, selectionEnd); editor.focus(); editor.dispatchEvent(new Event("input", { bubbles: true }));
+}
+function wrapEditorSelection(before, after = before, placeholder = "text") {
+  const editor = $("#editor-text"); let { selectionStart: start, selectionEnd: end } = editor; const selected = editor.value.slice(start, end);
+  if (selected.startsWith(before) && selected.endsWith(after) && selected.length >= before.length + after.length) {
+    const replacement = selected.slice(before.length, selected.length - after.length); return replaceEditorText(start, end, replacement, start, start + replacement.length);
+  }
+  if (start >= before.length && editor.value.slice(start - before.length, start) === before && editor.value.slice(end, end + after.length) === after) {
+    return replaceEditorText(start - before.length, end + after.length, selected, start - before.length, end - before.length);
+  }
+  const content = selected || placeholder; const replacement = `${before}${content}${after}`;
+  replaceEditorText(start, end, replacement, start + before.length, start + before.length + content.length);
+}
+function insertEditorLink() {
+  const editor = $("#editor-text"); const start = editor.selectionStart, end = editor.selectionEnd;
+  const label = editor.value.slice(start, end) || "link text";
+  const url = window.prompt("Link URL", "https://"); if (url === null) return editor.focus();
+  const title = window.prompt("Optional link title", ""); if (title === null) return editor.focus();
+  const destination = url.trim() || "https://example.com";
+  const titlePart = title.trim() ? ` \"${title.trim().replaceAll('"', '\\"')}\"` : "";
+  const replacement = `[${label}](${destination}${titlePart})`;
+  replaceEditorText(start, end, replacement, start + 1, start + 1 + label.length);
+}
+function toggleEditorLinePrefix(prefix, matcher) {
+  const editor = $("#editor-text"); const start = editor.value.lastIndexOf("\n", Math.max(0, editor.selectionStart - 1)) + 1;
+  const selectedEnd = editor.selectionEnd > editor.selectionStart ? editor.selectionEnd - 1 : editor.selectionEnd;
+  const nextBreak = editor.value.indexOf("\n", selectedEnd); const end = nextBreak < 0 ? editor.value.length : nextBreak;
+  const lines = editor.value.slice(start, end).split("\n"); const remove = lines.filter((line) => line.trim()).every((line) => matcher.test(line));
+  const replacement = lines.map((line) => remove ? line.replace(matcher, "") : (line.trim() ? prefix + line : line)).join("\n");
+  replaceEditorText(start, end, replacement, start, start + replacement.length);
+}
+function setEditorHeading(level) {
+  const editor = $("#editor-text"); const start = editor.value.lastIndexOf("\n", Math.max(0, editor.selectionStart - 1)) + 1;
+  const selectedEnd = editor.selectionEnd > editor.selectionStart ? editor.selectionEnd - 1 : editor.selectionEnd;
+  const nextBreak = editor.value.indexOf("\n", selectedEnd); const end = nextBreak < 0 ? editor.value.length : nextBreak;
+  const lines = editor.value.slice(start, end).split("\n"); const exact = new RegExp(`^\\s*#{${level}}\\s+`);
+  const remove = lines.filter((line) => line.trim()).every((line) => exact.test(line));
+  const replacement = lines.map((line) => {
+    if (!line.trim()) return line;
+    const content = line.replace(/^\s*#{1,6}\s+/, "");
+    return remove ? content : `${"#".repeat(level)} ${content}`;
+  }).join("\n");
+  replaceEditorText(start, end, replacement, start, start + replacement.length);
+}
+function insertEditorHorizontalRule() {
+  const editor = $("#editor-text"); const at = editor.selectionEnd;
+  const before = editor.value.slice(0, at), after = editor.value.slice(at);
+  const leading = !before ? "" : before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+  const trailing = !after ? "\n" : after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
+  const insertion = `${leading}---${trailing}`; replaceEditorText(at, at, insertion, at + insertion.length, at + insertion.length);
+}
+function formatEditorMarkdown() {
+  const editor = $("#editor-text"); const start = editor.selectionStart, end = editor.selectionEnd;
+  const formatted = prettifyMarkdown(editor.value); editor.setRangeText(formatted, 0, editor.value.length, "end");
+  editor.setSelectionRange(Math.min(start, formatted.length), Math.min(end, formatted.length)); editor.focus(); editor.dispatchEvent(new Event("input", { bubbles: true })); toast("Markdown formatted");
+}
+function runMarkdownCommand(command) {
+  if (!$("#editor-text")) return;
+  if (command === "bold") return wrapEditorSelection("**", "**", "bold text");
+  if (command === "italic") return wrapEditorSelection("*", "*", "italic text");
+  if (command === "code") return wrapEditorSelection("`", "`", "code");
+  if (command === "link") return insertEditorLink();
+  if (command.startsWith("heading-")) return setEditorHeading(Number(command.slice(-1)));
+  if (command === "quote") return toggleEditorLinePrefix("> ", /^\s*>\s+/);
+  if (command === "bullet") return toggleEditorLinePrefix("- ", /^\s*[-+*]\s+/);
+  if (command === "number") return toggleEditorLinePrefix("1. ", /^\s*\d+[.)]\s+/);
+  if (command === "rule") return insertEditorHorizontalRule();
+  if (command === "format") return formatEditorMarkdown();
+}
+function indentEditorSelection(outdent = false) {
+  const editor = $("#editor-text"); const start = editor.value.lastIndexOf("\n", Math.max(0, editor.selectionStart - 1)) + 1;
+  const selectedEnd = editor.selectionEnd > editor.selectionStart ? editor.selectionEnd - 1 : editor.selectionEnd;
+  const nextBreak = editor.value.indexOf("\n", selectedEnd); const end = nextBreak < 0 ? editor.value.length : nextBreak;
+  const replacement = editor.value.slice(start, end).split("\n").map((line) => outdent ? line.replace(/^( {1,2}|\t)/, "") : `  ${line}`).join("\n");
+  replaceEditorText(start, end, replacement, start, start + replacement.length);
+}
+function handleEditorKeydown(event) {
+  const modifier = event.ctrlKey || event.metaKey; const key = event.key.toLocaleLowerCase();
+  const commands = { b: "bold", i: "italic", k: "link" };
+  if (modifier && commands[key]) { event.preventDefault(); event.stopPropagation(); return runMarkdownCommand(commands[key]); }
+  if (modifier && event.shiftKey && event.code === "Digit7") { event.preventDefault(); return runMarkdownCommand("number"); }
+  if (modifier && event.shiftKey && event.code === "Digit8") { event.preventDefault(); return runMarkdownCommand("bullet"); }
+  if (modifier && event.altKey && /^Digit[1-4]$/.test(event.code)) { event.preventDefault(); return runMarkdownCommand(`heading-${event.code.at(-1)}`); }
+  if (modifier && event.shiftKey && key === "f") { event.preventDefault(); event.stopPropagation(); return runMarkdownCommand("format"); }
+  if (modifier && key === "s") { event.preventDefault(); event.stopPropagation(); return savePage(); }
+  if (event.key === "Tab") { event.preventDefault(); return indentEditorSelection(event.shiftKey); }
+}
 async function savePage() {
   let path = $("#editor-path").value.trim().replaceAll("\\", "/"); if (!/\.md$/i.test(path)) path += ".md";
   if (!path || path.startsWith("/") || path.includes("..")) return toast("Choose a safe path inside the content folder");
@@ -185,6 +314,90 @@ function renderGM() {
 function initiatives() { return JSON.parse(localStorage.getItem(STORAGE.initiative) || "[]"); }
 function renderInitiative() { const list = initiatives().sort((a,b) => Number(b.score)-Number(a.score)); $("#initiative-list").innerHTML = list.map((item, index) => `<div class="initiative-row"><input data-init-name="${index}" value="${esc(item.name)}" placeholder="Combatant"><input type="number" data-init-score="${index}" value="${esc(item.score)}" placeholder="Init"><button data-init-remove="${index}">×</button></div>`).join("") || `<div class="empty-state" style="padding:35px 10px">Add combatants when the encounter begins.</div>`; }
 function updateInitiative() { const list = initiatives(); $$("[data-init-name]").forEach((input) => list[input.dataset.initName].name = input.value); $$("[data-init-score]").forEach((input) => list[input.dataset.initScore].score = input.value); localStorage.setItem(STORAGE.initiative, JSON.stringify(list)); }
+
+const adminPassword = () => sessionStorage.getItem("folder-wiki-admin-password") || "";
+async function adminApi(url, options = {}) {
+  return api(url, { ...options, headers: { ...(options.headers || {}), "x-admin-password": adminPassword() } });
+}
+function renderAdminLogin(message = "") {
+  setChrome("File visibility"); $(".primary-nav [data-action=admin]").classList.add("active");
+  view.innerHTML = `<form class="admin-login"><div class="eyebrow">Administration</div><h1>File visibility</h1><p>Enter the local admin password to choose which content files appear in the wiki.</p>${message ? `<div class="admin-error">${esc(message)}</div>` : ""}<label>Password<input id="admin-password" type="password" autocomplete="current-password"></label><button class="button" type="submit">Unlock file manager</button></form>`;
+  $("#admin-password").focus();
+}
+async function renderAdmin() {
+  setChrome("File visibility"); $(".primary-nav [data-action=admin]").classList.add("active");
+  if (!adminPassword()) return renderAdminLogin();
+  try { await loadAdminFiles(); renderAdminManager(); }
+  catch (error) { sessionStorage.removeItem("folder-wiki-admin-password"); renderAdminLogin(error.message); }
+}
+async function loadAdminFiles() {
+  const [files, folders] = await Promise.all([adminApi("/api/admin/files"), api("/api/folders?refresh=1")]);
+  state.adminFiles = files; state.folderPaths = folders;
+  const available = new Set(files.map((file) => file.path));
+  state.adminSelection = new Set([...state.adminSelection].filter((file) => available.has(file)));
+  if (state.adminAnchor && !available.has(state.adminAnchor)) state.adminAnchor = null;
+}
+function selectedAdminPaths() { return [...state.adminSelection]; }
+function adminPreviewUrl(file) { return `/api/admin/preview?path=${encodeURIComponent(file.path)}&password=${encodeURIComponent(adminPassword())}`; }
+function adminFileRows() { return $$("[data-admin-file-row]").map((row) => row.dataset.adminFileRow); }
+function syncAdminSelection() {
+  $$("[data-admin-file-row]").forEach((row) => { const selected = state.adminSelection.has(row.dataset.adminFileRow); row.classList.toggle("is-selected", selected); row.setAttribute("aria-selected", selected); });
+  const count = $("#admin-selection-count"); if (count) count.textContent = `${state.adminSelection.size} selected`;
+}
+function selectAdminRow(path, event) {
+  const order = adminFileRows(); const additive = event.ctrlKey || event.metaKey;
+  if (event.shiftKey && state.adminAnchor && order.includes(state.adminAnchor)) {
+    if (!additive) state.adminSelection.clear();
+    const from = order.indexOf(state.adminAnchor), to = order.indexOf(path);
+    order.slice(Math.min(from, to), Math.max(from, to) + 1).forEach((item) => state.adminSelection.add(item));
+  } else if (additive) {
+    state.adminSelection.has(path) ? state.adminSelection.delete(path) : state.adminSelection.add(path);
+    state.adminAnchor = path;
+  } else {
+    state.adminSelection = new Set([path]); state.adminAnchor = path;
+  }
+  syncAdminSelection();
+}
+function renderAdminManager() {
+  const nodes = new Map();
+  for (const folder of state.folderPaths) nodes.set(folder, { path: folder, name: folder.split("/").at(-1), folders: [], files: [] });
+  for (const file of state.adminFiles) {
+    if (!nodes.has(file.folder)) nodes.set(file.folder, { path: file.folder, name: file.folder.split("/").at(-1), folders: [], files: [] });
+    nodes.get(file.folder).files.push(file);
+  }
+  const roots = [];
+  for (const node of nodes.values()) {
+    const parts = node.path.split("/"); const parent = parts.length > 1 ? parts.slice(0, -1).join("/") : null;
+    if (parent && nodes.has(parent)) nodes.get(parent).folders.push(node); else roots.push(node);
+  }
+  const sortByName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
+  for (const node of nodes.values()) { node.folders.sort(sortByName); node.files.sort(sortByName); }
+  roots.sort(sortByName);
+  const fileRow = (file, depth) => {
+    const selected = state.adminSelection.has(file.path);
+    const preview = file.type === "image" ? `<img class="admin-preview" loading="lazy" src="${esc(adminPreviewUrl(file))}" alt="">` : `<span class="admin-file-icon">${icons[file.type] || "·"}</span>`;
+    return `<div class="admin-file ${file.visible ? "" : "is-hidden"} ${selected ? "is-selected" : ""}" data-admin-file-row="${esc(file.path)}" style="--depth:${depth}" tabindex="0" role="option" aria-selected="${selected}">${preview}<span class="admin-file-name"><strong>${esc(file.name)}</strong><small>${esc(file.path)}</small></span><label class="visibility-toggle"><input type="checkbox" data-admin-visible="${esc(file.path)}" ${file.visible ? "checked" : ""}><span>Visible</span></label></div>`;
+  };
+  const branch = (node, depth = 0) => {
+    const collapsed = state.adminCollapsed.has(node.path); const hasChildren = node.folders.length || node.files.length;
+    return `<section class="admin-folder-node"><button class="admin-folder-row" data-admin-folder="${esc(node.path)}" style="--depth:${depth}" aria-expanded="${!collapsed}"><span class="admin-folder-chevron">${hasChildren ? (collapsed ? "▶" : "▼") : "·"}</span><span class="admin-folder-icon">▱</span><strong>${esc(node.name)}</strong><small>${node.files.length} file${node.files.length === 1 ? "" : "s"}</small></button><div class="admin-children ${collapsed ? "is-collapsed" : ""}">${node.folders.map((child) => branch(child, depth + 1)).join("")}${node.files.map((file) => fileRow(file, depth + 1)).join("")}</div></section>`;
+  };
+  const visible = state.adminFiles.filter((file) => file.visible).length;
+  const tree = roots.map((node) => branch(node)).join("");
+  view.innerHTML = `<div class="document-header"><div class="eyebrow">Administration</div><h1>File visibility</h1><div class="document-meta">${visible} of ${state.adminFiles.length} files visible · Click a row to select, Ctrl-click to add or remove, Shift-click for a range</div></div><div class="admin-toolbar"><button class="button ghost" data-action="admin-expand-all">Expand all</button><button class="button ghost" data-action="admin-collapse-all">Collapse all</button><span id="admin-selection-count">${state.adminSelection.size} selected</span><button class="button ghost" data-action="admin-hide-selected">Hide selected</button><button class="button" data-action="admin-show-selected">Show selected</button><button class="button ghost" data-action="admin-logout">Lock</button></div><div class="admin-tree" role="listbox" aria-multiselectable="true">${tree || `<div class="empty-state">No article folders were found.</div>`}</div>`;
+}
+async function updateAdminVisibility(paths, visible) {
+  if (!paths.length) return toast("Select at least one file");
+  try {
+    await adminApi("/api/admin/visibility", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ paths, visible }) });
+    await Promise.all([loadAdminFiles(), loadFiles(true)]); state.adminSelection.clear(); state.adminAnchor = null; renderAdminManager(); toast(`${paths.length} file${paths.length === 1 ? "" : "s"} ${visible ? "shown" : "hidden"}`);
+  } catch (error) { toast(error.message); }
+}
+async function unlockAdmin() {
+  const password = $("#admin-password")?.value || ""; sessionStorage.setItem("folder-wiki-admin-password", password);
+  try { await loadAdminFiles(); renderAdminManager(); }
+  catch (error) { sessionStorage.removeItem("folder-wiki-admin-password"); renderAdminLogin(error.message); }
+}
 
 function openSearch() { $("#search-modal").classList.remove("hidden"); $("#search-input").focus(); }
 function closeSearch() { $("#search-modal").classList.add("hidden"); }
@@ -219,20 +432,34 @@ async function route() {
   if (routeName === "all") return renderList("All articles", state.articles);
   if (routeName === "pinned") { const pins = pinned(); return renderList("Pinned articles", state.articles.filter((article) => pins.includes(article.path)), "A short shelf of references you want close at hand."); }
   if (routeName === "gm") return renderGM();
+  if (routeName === "admin") return renderAdmin();
   if (routeName === "new") return renderEditor();
   renderHome();
 }
 async function loadFiles(refresh = false) { const suffix = refresh ? "?refresh=1" : ""; state.files = await api(`/api/files${suffix}`); state.folderPaths = await api(`/api/folders${suffix}`); buildArticles(); buildTree(); }
 
 document.addEventListener("click", async (event) => {
+  const markdownTool = event.target.closest("[data-md-command]");
+  if (markdownTool) return runMarkdownCommand(markdownTool.dataset.mdCommand);
+  const editSource = event.target.closest("[data-edit-file]");
+  if (editSource) {
+    const file = state.files.find((item) => item.path === editSource.dataset.editFile); if (!file) return toast("That file is no longer available");
+    try { const data = await api(`/api/file?path=${encodeURIComponent(file.path)}`); state.currentFile = file; state.content = data.content; return renderEditor(file); }
+    catch (error) { return toast(error.message); }
+  }
   const articleNode = event.target.closest("[data-article]"); if (articleNode) { closeSearch(); return navigate(`#article/${encodeURIComponent(articleNode.dataset.article)}`); }
   const imageNode = event.target.closest("[data-image]"); if (imageNode) return openImage(imageNode.dataset.image, imageNode.dataset.imageTitle);
   const treeToggle = event.target.closest(".tree-toggle"); if (treeToggle) return treeToggle.closest(".tree-folder").classList.toggle("closed");
+  if (event.target.closest(".visibility-toggle")) return;
+  const adminFolder = event.target.closest("[data-admin-folder]");
+  if (adminFolder) { const path = adminFolder.dataset.adminFolder; state.adminCollapsed.has(path) ? state.adminCollapsed.delete(path) : state.adminCollapsed.add(path); return renderAdminManager(); }
+  const adminRow = event.target.closest("[data-admin-file-row]");
+  if (adminRow) return selectAdminRow(adminRow.dataset.adminFileRow, event);
   const die = event.target.closest("[data-die]"); if (die) { const sides = Number(die.dataset.die); $("#dice-result").textContent = Math.floor(Math.random() * sides) + 1; return; }
   const remove = event.target.closest("[data-init-remove]"); if (remove) { const list = initiatives(); list.splice(Number(remove.dataset.initRemove), 1); localStorage.setItem(STORAGE.initiative, JSON.stringify(list)); return renderInitiative(); }
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
-  if (["home","all","pinned","gm","new"].includes(action)) return navigate(`#${action}`);
+  if (["home","all","pinned","gm","admin","new"].includes(action)) return navigate(`#${action}`);
   if (action === "search") return openSearch();
   if (action === "menu") return $("#sidebar").classList.toggle("open");
   if (action === "collapse") return $$(".tree-folder").forEach((node) => node.classList.add("closed"));
@@ -242,13 +469,24 @@ document.addEventListener("click", async (event) => {
   if (action === "save") return savePage();
   if (action === "pin" && state.current) { const pins = pinned(), at = pins.indexOf(state.current.path); at >= 0 ? pins.splice(at,1) : pins.push(state.current.path); setPinned(pins); event.target.classList.toggle("is-pinned"); toast(at >= 0 ? "Removed from pinned" : "Pinned for quick access"); }
   if (action === "add-initiative") { const list = initiatives(); list.push({ name:"", score:"" }); localStorage.setItem(STORAGE.initiative, JSON.stringify(list)); renderInitiative(); $$("[data-init-name]").at(-1)?.focus(); }
+  if (action === "admin-expand-all") { state.adminCollapsed.clear(); return renderAdminManager(); }
+  if (action === "admin-collapse-all") { state.folderPaths.forEach((folder) => state.adminCollapsed.add(folder)); return renderAdminManager(); }
+  if (action === "admin-show-selected") return updateAdminVisibility(selectedAdminPaths(), true);
+  if (action === "admin-hide-selected") return updateAdminVisibility(selectedAdminPaths(), false);
+  if (action === "admin-logout") { sessionStorage.removeItem("folder-wiki-admin-password"); return renderAdminLogin(); }
 });
-document.addEventListener("change", (event) => { if (event.target.matches("[data-init-name],[data-init-score]")) { updateInitiative(); renderInitiative(); } });
+document.addEventListener("change", (event) => {
+  if (event.target.matches("[data-init-name],[data-init-score]")) { updateInitiative(); renderInitiative(); }
+  if (event.target.matches("[data-admin-visible]")) updateAdminVisibility([event.target.dataset.adminVisible], event.target.checked);
+});
+document.addEventListener("submit", (event) => { if (event.target.matches(".admin-login")) { event.preventDefault(); unlockAdmin(); } });
 $("#search-modal").addEventListener("click", (event) => { if (event.target === $("#search-modal")) closeSearch(); });
 $("#search-input").addEventListener("input", (event) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => runSearch(event.target.value), 180); });
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openSearch(); }
-  if (event.key === "Escape") closeSearch();
+  const adminOpen = Boolean($(".admin-tree")); const typing = event.target.matches("input,textarea,[contenteditable=true]");
+  if (adminOpen && !typing && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") { event.preventDefault(); state.adminSelection = new Set(adminFileRows()); state.adminAnchor = adminFileRows().at(-1) || null; syncAdminSelection(); }
+  if (event.key === "Escape") { if (!$("#search-modal").classList.contains("hidden")) closeSearch(); else if (adminOpen) { state.adminSelection.clear(); state.adminAnchor = null; syncAdminSelection(); } }
   if (!$("#search-modal").classList.contains("hidden") && ["ArrowDown","ArrowUp","Enter"].includes(event.key)) { event.preventDefault(); if (event.key === "ArrowDown") state.selectedResult = Math.min(state.searchResults.length - 1, state.selectedResult + 1); if (event.key === "ArrowUp") state.selectedResult = Math.max(0, state.selectedResult - 1); if (event.key === "Enter" && state.searchResults[state.selectedResult]) { closeSearch(); navigate(`#article/${encodeURIComponent(state.searchResults[state.selectedResult].path)}`); } else renderSearchResults(); }
 });
 window.addEventListener("hashchange", route);
