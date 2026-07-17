@@ -16,15 +16,16 @@ Folder Wiki works especially well as a personal encyclopedia, research archive, 
 - Responsive image galleries with a full-size lightbox
 - ZIP and other supported archive downloads
 - Full-text search across paths, Markdown, text, JSON, and optionally PDFs
-- Markdown creation, editing, and live preview in the browser
+- Admin-only Markdown creation, editing, and live preview in the browser
+- Account signup, secure sessions, cumulative roles, and per-role content access
 - Recently updated, pinned, filtered, and random article navigation
 - Local GM screen with initiative tracker, dice roller, and scratchpad
 - Responsive layout for desktop and mobile browsers
-- No database, build step, cloud service, or runtime dependencies
+- Built-in SQLite persistence with no external database service or runtime package dependencies
 
 ## Requirements
 
-- [Node.js 20 or newer](https://nodejs.org/)
+- [Node.js 24.15 or newer](https://nodejs.org/)
 - Any modern browser
 - Optional: `pdftotext` on your `PATH` to make PDF contents searchable
 
@@ -42,6 +43,8 @@ npm start
 ```
 
 Open <http://127.0.0.1:4173>.
+
+The first account created from the signup screen receives the default **GM** administrator role. Later signups receive the default **Player** viewer role.
 
 ## Feed the wiki
 
@@ -71,7 +74,7 @@ This produces:
 
 Only files directly inside a folder appear in that folder's article. A subfolder's files stay in the child article. Folder names become article titles; hyphens and underscores are displayed as spaces. Files placed directly in `content/` are ignored because every article must have its own folder.
 
-You can add content in two ways:
+Administrators can add content in two ways:
 
 1. Copy, move, or edit files inside `content/` with your normal tools.
 2. Use **Add entry** in the web interface to create a Markdown file. Paths entered there are relative to `content/`, for example `People/Allies/New Ally.md`.
@@ -110,26 +113,28 @@ PDF text extraction is intentionally optional. If the `pdftotext` command is ava
 
 ## File visibility administration
 
-Open **File visibility** in the sidebar and enter the local admin password. The default is:
+Every request requires a logged-in account. Passwords are hashed with Node's built-in `scrypt`; login sessions use random, expiring, HttpOnly, SameSite cookies. The user database is stored locally at `.folder-wiki/wiki.db`.
 
-```text
-gmrules
-```
+The default roles are **GM** and **Player**. GM is an administrator role and Player is a viewer role. The first signup receives GM; public signups after that receive Player. Default roles may be renamed but cannot be deleted or changed between administrator and viewer permissions.
 
-Change `ADMIN_PASSWORD` in [`config.mjs`](config.mjs) and restart the server to use another password. This is deliberately a simple local gate, not a secure user or authentication system.
+Administrators can open **User management** to see usernames, join dates, last-login dates, and assigned roles. They can create, edit, and delete accounts; reset passwords; combine several roles on one account; and add, rename, change, or remove custom roles. Safeguards prevent removing the final administrator or deleting a role while it is someone's only role.
+
+Role access is cumulative. A user assigned Player and Gnome sees every file granted to either Player or Gnome. Administrator roles bypass file visibility entirely and show a warning on articles containing sources hidden from every viewer role.
+
+Open **File visibility** as an administrator and choose the viewer role whose access you want to edit.
 
 The manager mirrors the real `content/` hierarchy as a collapsible file tree. Expand or collapse folders to navigate deeply nested articles, and use the thumbnail beside an image file as a quick visual reference. Each file has its own **Visible** checkbox.
 
 For bulk changes, click anywhere on a file row to select it. Use `Ctrl`-click (or `Cmd`-click on macOS) to add or remove individual rows, and `Shift`-click to select a range from the previous selection. `Ctrl+A`/`Cmd+A` selects all files currently revealed in expanded folders, and `Escape` clears the selection. **Show selected** and **Hide selected** apply the visibility change to the selected rows.
 
-Hidden files are removed from article pages, file counts, search results, text APIs, and direct media URLs. Their files remain untouched on disk, and they can be restored from the manager at any time. New files are visible by default.
+Files not granted to any of a viewer's roles are removed from article pages, folder navigation, file counts, search results, text APIs, and direct media URLs. Their files remain untouched on disk. Newly discovered files are granted to the default Player role; newly created custom viewer roles start with no file grants.
 
-Visibility choices are stored in `.folder-wiki/visibility.json`. That runtime directory is Git-ignored and should not be committed.
+Users, roles, sessions, and role visibility grants are stored in `.folder-wiki/wiki.db`. The runtime directory is Git-ignored and should not be committed. Existing `.folder-wiki/visibility.json` choices are respected when files are first migrated into the role database.
 
 ## Local browser data
 
 
-Pinned articles, initiative entries, and GM scratch notes are stored in your browser's local storage. The entered admin password is retained only in the browser tab's session storage. None of these values are written into `content/` or synchronized between browsers.
+Pinned articles, initiative entries, and GM scratch notes are stored in your browser's local storage. Login sessions are stored in the local SQLite database and represented in the browser by an HttpOnly cookie. None of these values are written into `content/` or synchronized between browsers.
 
 ## Configuration
 
@@ -153,11 +158,11 @@ $env:HOST="0.0.0.0"
 npm start
 ```
 
-Only expose Folder Wiki on a trusted network. The browser editor can create and modify Markdown files inside `content/`; the server is not designed for public internet hosting or untrusted users.
+Only expose Folder Wiki on a trusted network. Accounts and role authorization protect campaign information from other wiki users, but the server is designed for local or trusted-network use rather than hardened public internet hosting.
 
 ## Backups
 
-There is no proprietary data format. Back up the `content/` directory with your preferred filesystem, sync, or version-control tool. To version your own content, remove the `content/` rule from `.gitignore` or keep the directory in a separate private repository.
+Wiki content remains ordinary files. Back up both `content/` and `.folder-wiki/wiki.db`; the latter contains accounts, roles, sessions, and access grants. To version your own content, remove the `content/` rule from `.gitignore` or keep the directory in a separate private repository. Never publish the runtime database.
 
 ## Development
 
@@ -165,7 +170,7 @@ There is no proprietary data format. Back up the `content/` directory with your 
 npm test
 ```
 
-The test suite performs syntax checks, path-containment checks, title parsing, clean-start HTTP smoke tests, and end-to-end admin visibility checks. GitHub Actions runs it on Windows for every push and pull request.
+The test suite performs syntax checks, path-containment checks, title parsing, authentication and role-model tests, clean-start HTTP smoke tests, and end-to-end viewer/admin authorization checks. GitHub Actions runs it on Windows for every push and pull request.
 
 ## License
 

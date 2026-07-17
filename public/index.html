@@ -8,7 +8,21 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="app-shell">
+  <section class="auth-screen" id="auth-screen">
+    <div class="auth-card">
+      <div class="auth-brand"><div class="brand-mark">F</div><div><strong>Folder Wiki</strong><span>Your local knowledge base</span></div></div>
+      <div class="auth-tabs"><button data-auth-mode="login" class="active">Log in</button><button data-auth-mode="register">Sign up</button></div>
+      <form id="auth-form">
+        <div class="eyebrow" id="auth-eyebrow">Welcome back</div><h1 id="auth-title">Log in</h1>
+        <p id="auth-copy">Enter your account details to open the wiki.</p><div class="admin-error hidden" id="auth-error"></div>
+        <label>Username<input id="auth-username" name="username" autocomplete="username" required minlength="3" maxlength="32"></label>
+        <label>Password<input id="auth-password" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="256"></label>
+        <button class="button" id="auth-submit" type="submit">Log in</button>
+      </form>
+    </div>
+  </section>
+
+  <div class="app-shell hidden" id="app-shell">
     <aside class="sidebar" id="sidebar">
       <div class="brand" data-action="home" tabindex="0">
         <div class="brand-mark">F</div>
@@ -19,12 +33,14 @@
         <button data-action="home" class="active"><span>⌂</span> Overview</button>
         <button data-action="all"><span>☷</span> All entries</button>
         <button data-action="pinned"><span>◇</span> Pinned</button>
-        <button data-action="gm"><span>⚄</span> GM screen</button>
-        <button data-action="admin"><span>⚙</span> File visibility</button>
+        <button data-action="gm" data-admin-only><span>⚄</span> GM screen</button>
+        <button data-action="admin" data-admin-only><span>⚙</span> File visibility</button>
+        <button data-action="users" data-admin-only><span>♙</span> User management</button>
       </nav>
       <div class="nav-heading"><span>Content</span><button title="Collapse folders" data-action="collapse">−</button></div>
       <div class="file-tree" id="file-tree"></div>
-      <button class="new-page" data-action="new">＋ New page</button>
+      <button class="new-page" data-action="new" data-admin-only>＋ New page</button>
+      <div class="sidebar-user"><div><strong id="session-username"></strong><span id="session-roles"></span></div><button data-action="logout" title="Log out">↪</button></div>
       <div class="sidebar-footer"><span class="status-dot"></span><span id="library-status">Reading library…</span></div>
     </aside>
 
@@ -35,7 +51,7 @@
         <div class="top-actions">
           <button class="icon-button" data-action="random" title="Random entry">⚄</button>
           <button class="button ghost hidden" id="edit-button" data-action="edit">Edit page</button>
-          <button class="button" data-action="new">＋ Add entry</button>
+          <button class="button" data-action="new" data-admin-only>＋ Add entry</button>
         </div>
       </header>
       <div id="view" class="view"></div>

@@ -3,7 +3,7 @@ import { prettifyMarkdown } from "./editor-utils.mjs";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const view = $("#view");
-const state = { files: [], folderPaths: [], articles: [], current: null, currentFile: null, content: "", searchResults: [], selectedResult: 0, adminFiles: [], adminSelection: new Set(), adminCollapsed: new Set(), adminAnchor: null };
+const state = { user: null, authMode: "login", files: [], folderPaths: [], articles: [], current: null, currentFile: null, content: "", searchResults: [], selectedResult: 0, adminFiles: [], adminRoles: [], adminRoleId: null, adminSelection: new Set(), adminCollapsed: new Set(), adminAnchor: null };
 const icons = { markdown: "▤", pdf: "▥", image: "▧", archive: "⬡" };
 const esc = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 const contentUrl = (file) => `/content/${file.split("/").map(encodeURIComponent).join("/")}`;
@@ -20,8 +20,33 @@ function toast(message) {
 async function api(url, options) {
   const response = await fetch(url, options);
   const data = await response.json();
+  if (response.status === 401 && !url.startsWith("/api/auth/")) showAuth();
   if (!response.ok) throw new Error(data.error || "Something went wrong");
   return data;
+}
+function setAuthMode(mode) {
+  state.authMode = mode; const registering = mode === "register";
+  $$("[data-auth-mode]").forEach((button) => button.classList.toggle("active", button.dataset.authMode === mode));
+  $("#auth-eyebrow").textContent = registering ? "Create an account" : "Welcome back";
+  $("#auth-title").textContent = registering ? "Sign up" : "Log in";
+  $("#auth-copy").textContent = registering ? "New accounts receive the Player role. The first account becomes the GM administrator." : "Enter your account details to open the wiki.";
+  $("#auth-submit").textContent = registering ? "Create account" : "Log in";
+  $("#auth-password").autocomplete = registering ? "new-password" : "current-password";
+  $("#auth-error").classList.add("hidden");
+}
+function showAuth(message = "") {
+  state.user = null; $("#app-shell").classList.add("hidden"); $("#auth-screen").classList.remove("hidden");
+  closeSearch(); setAuthMode(state.authMode); const error = $("#auth-error"); error.textContent = message; error.classList.toggle("hidden", !message); $("#auth-username").focus();
+}
+function showApp(user) {
+  state.user = user; $("#auth-screen").classList.add("hidden"); $("#app-shell").classList.remove("hidden");
+  $$('[data-admin-only]').forEach((node) => node.classList.toggle("hidden", !user.isAdmin));
+  $("#session-username").textContent = user.username; $("#session-roles").textContent = user.roles.map((role) => role.name).join(" · ");
+}
+async function submitAuth() {
+  const input = { username: $("#auth-username").value, password: $("#auth-password").value };
+  try { const user = await api(`/api/auth/${state.authMode}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) }); showApp(user); await loadFiles(true); navigate("#home"); }
+  catch (error) { const node = $("#auth-error"); node.textContent = error.message; node.classList.remove("hidden"); }
 }
 function setChrome(label, editable = false) {
   $("#breadcrumbs").textContent = `Wiki / ${label}`;
@@ -137,13 +162,15 @@ async function openArticle(path) {
   state.current = article; state.currentFile = null; state.content = "";
   const textFiles = article.files.filter((file) => file.type === "markdown");
   const editableFiles = textFiles.filter((file) => ["md", "markdown"].includes(file.ext));
-  const isEditable = editableFiles.length === 1;
+  const isEditable = state.user.isAdmin && editableFiles.length === 1;
   setChrome(article.path, isEditable);
   const breadcrumbParts = article.path.split("/");
   $("#breadcrumbs").innerHTML = `<button data-action="home">Wiki</button>${breadcrumbParts.map((part, index) => { const target = breadcrumbParts.slice(0, index + 1).join("/"); return `<span>/</span><button data-article="${esc(target)}">${esc(articleTitle(part))}</button>`; }).join("")}`;
   const isPinned = pinned().includes(article.path);
   const totalSize = article.files.reduce((sum, file) => sum + file.size, 0);
-  const header = `<header class="document-header"><button class="pin-button ${isPinned ? "is-pinned" : ""}" data-action="pin" title="Pin this article">◇</button><div class="eyebrow">Folder article${article.parent ? ` · <button class="inline-link" data-article="${esc(article.parent)}">${esc(articleTitle(article.parent))}</button>` : ""}</div><h1>${esc(article.title)}</h1><div class="document-meta"><span>${article.files.length} direct sources</span><span>${article.children.length} child articles</span>${article.modified ? `<span>Updated ${formatDate(article.modified)}</span>` : ""}${totalSize ? `<span>${formatSize(totalSize)}</span>` : ""}</div></header>`;
+  const restricted = state.user.isAdmin ? article.files.filter((file) => file.viewerVisible === false).length : 0;
+  const warning = restricted ? `<div class="restriction-warning"><strong>Restricted content</strong><span>${restricted === article.files.length ? "This article is hidden from all viewer roles." : `${restricted} source${restricted === 1 ? " is" : "s are"} hidden from all viewer roles.`}</span></div>` : "";
+  const header = `<header class="document-header"><button class="pin-button ${isPinned ? "is-pinned" : ""}" data-action="pin" title="Pin this article">◇</button><div class="eyebrow">Folder article${article.parent ? ` · <button class="inline-link" data-article="${esc(article.parent)}">${esc(articleTitle(article.parent))}</button>` : ""}</div><h1>${esc(article.title)}</h1><div class="document-meta"><span>${article.files.length} direct sources</span><span>${article.children.length} child articles</span>${article.modified ? `<span>Updated ${formatDate(article.modified)}</span>` : ""}${totalSize ? `<span>${formatSize(totalSize)}</span>` : ""}</div></header>${warning}`;
   try {
     const loaded = await Promise.all(textFiles.map(async (file, index) => {
       const data = await api(`/api/file?path=${encodeURIComponent(file.path)}`);
@@ -153,7 +180,7 @@ async function openArticle(path) {
     if (isEditable) { state.currentFile = editableFiles[0]; state.content = loaded.find((item) => item.file.path === editableFiles[0].path)?.content || ""; }
     const childNav = article.children.length ? `<section class="child-articles"><div class="section-kicker">Sub-articles</div><div class="child-grid">${article.children.map((child) => `<article class="child-card" data-article="${esc(child.path)}"><span>▱</span><div><strong>${esc(child.title)}</strong><small>${child.files.length} sources · ${child.children.length} children</small></div><b>→</b></article>`).join("")}</div></section>` : "";
     const markdown = loaded.map((item) => {
-      const canEdit = ["md", "markdown"].includes(item.file.ext);
+      const canEdit = state.user.isAdmin && ["md", "markdown"].includes(item.file.ext);
       return `<section class="article-source prose"><div class="source-toolbar"><div class="source-label">Source · ${esc(item.file.name)}</div>${canEdit ? `<button class="source-edit" data-edit-file="${esc(item.file.path)}">Edit source</button>` : ""}</div>${item.html}</section>`;
     }).join("");
     const pdfs = article.files.filter((file) => file.type === "pdf").map((file) => `<details class="embedded-source" open><summary><span>▥</span><strong>${esc(file.title)}</strong><a href="${contentUrl(file.path)}" target="_blank" title="Open PDF in a new tab">Open separately ↗</a></summary><iframe class="media-view embedded-pdf" loading="lazy" src="${contentUrl(file.path)}" title="${esc(file.title)}"></iframe></details>`).join("");
@@ -168,6 +195,7 @@ async function openArticle(path) {
 }
 
 function renderEditor(file = null) {
+  if (!state.user?.isAdmin) return navigate("#home");
   const isEdit = Boolean(file); setChrome(isEdit ? `Editing ${file.path}` : "New page");
   const initial = isEdit ? state.content : "# New page\n\nStart writing here. Use Markdown headings to keep longer articles easy to navigate.\n";
   const tool = (command, label, title, className = "") => `<button type="button" class="${className}" data-md-command="${command}" title="${title}" aria-label="${title}">${label}</button>`;
@@ -307,6 +335,7 @@ async function savePage() {
 }
 
 function renderGM() {
+  if (!state.user?.isAdmin) return navigate("#home");
   setChrome("GM screen"); $(".primary-nav [data-action=gm]").classList.add("active");
   view.innerHTML = `<div class="document-header"><div class="eyebrow">At-the-table utilities</div><h1>GM screen</h1><div class="document-meta">Initiative and notes are saved in this browser.</div></div><div class="gm-grid"><section class="tool-card"><div class="section-head"><h2>Initiative tracker</h2><button data-action="add-initiative">＋ Add combatant</button></div><div id="initiative-list"></div></section><div><section class="tool-card"><h2>Dice roller</h2><div class="dice-buttons">${[4,6,8,10,12,20,100].map((die) => `<button data-die="${die}">d${die}</button>`).join("")}</div><div class="dice-result" id="dice-result">—</div></section><section class="tool-card" style="margin-top:16px"><h2>Session scratchpad</h2><textarea class="quick-notes" id="quick-notes" placeholder="Names, HP, secrets, reminders…"></textarea></section></div></div>`;
   renderInitiative(); $("#quick-notes").value = localStorage.getItem(STORAGE.notes) || ""; $("#quick-notes").addEventListener("input", (e) => localStorage.setItem(STORAGE.notes, e.target.value));
@@ -315,30 +344,25 @@ function initiatives() { return JSON.parse(localStorage.getItem(STORAGE.initiati
 function renderInitiative() { const list = initiatives().sort((a,b) => Number(b.score)-Number(a.score)); $("#initiative-list").innerHTML = list.map((item, index) => `<div class="initiative-row"><input data-init-name="${index}" value="${esc(item.name)}" placeholder="Combatant"><input type="number" data-init-score="${index}" value="${esc(item.score)}" placeholder="Init"><button data-init-remove="${index}">×</button></div>`).join("") || `<div class="empty-state" style="padding:35px 10px">Add combatants when the encounter begins.</div>`; }
 function updateInitiative() { const list = initiatives(); $$("[data-init-name]").forEach((input) => list[input.dataset.initName].name = input.value); $$("[data-init-score]").forEach((input) => list[input.dataset.initScore].score = input.value); localStorage.setItem(STORAGE.initiative, JSON.stringify(list)); }
 
-const adminPassword = () => sessionStorage.getItem("folder-wiki-admin-password") || "";
-async function adminApi(url, options = {}) {
-  return api(url, { ...options, headers: { ...(options.headers || {}), "x-admin-password": adminPassword() } });
-}
-function renderAdminLogin(message = "") {
-  setChrome("File visibility"); $(".primary-nav [data-action=admin]").classList.add("active");
-  view.innerHTML = `<form class="admin-login"><div class="eyebrow">Administration</div><h1>File visibility</h1><p>Enter the local admin password to choose which content files appear in the wiki.</p>${message ? `<div class="admin-error">${esc(message)}</div>` : ""}<label>Password<input id="admin-password" type="password" autocomplete="current-password"></label><button class="button" type="submit">Unlock file manager</button></form>`;
-  $("#admin-password").focus();
-}
 async function renderAdmin() {
   setChrome("File visibility"); $(".primary-nav [data-action=admin]").classList.add("active");
-  if (!adminPassword()) return renderAdminLogin();
-  try { await loadAdminFiles(); renderAdminManager(); }
-  catch (error) { sessionStorage.removeItem("folder-wiki-admin-password"); renderAdminLogin(error.message); }
+  if (!state.user.isAdmin) return navigate("#home");
+  try {
+    state.adminRoles = await api("/api/admin/roles"); const viewerRoles = state.adminRoles.filter((role) => !role.isAdmin);
+    if (!viewerRoles.length) { view.innerHTML = `<div class="empty-state">Create a viewer role in User management before assigning file visibility.</div>`; return; }
+    if (!viewerRoles.some((role) => role.id === state.adminRoleId)) state.adminRoleId = (viewerRoles.find((role) => role.systemKey === "player") || viewerRoles[0]).id;
+    await loadAdminFiles(); renderAdminManager();
+  } catch (error) { view.innerHTML = `<div class="empty-state">${esc(error.message)}</div>`; }
 }
 async function loadAdminFiles() {
-  const [files, folders] = await Promise.all([adminApi("/api/admin/files"), api("/api/folders?refresh=1")]);
+  const [files, folders] = await Promise.all([api(`/api/admin/files?roleId=${state.adminRoleId}`), api("/api/folders?refresh=1")]);
   state.adminFiles = files; state.folderPaths = folders;
   const available = new Set(files.map((file) => file.path));
   state.adminSelection = new Set([...state.adminSelection].filter((file) => available.has(file)));
   if (state.adminAnchor && !available.has(state.adminAnchor)) state.adminAnchor = null;
 }
 function selectedAdminPaths() { return [...state.adminSelection]; }
-function adminPreviewUrl(file) { return `/api/admin/preview?path=${encodeURIComponent(file.path)}&password=${encodeURIComponent(adminPassword())}`; }
+function adminPreviewUrl(file) { return `/api/admin/preview?path=${encodeURIComponent(file.path)}`; }
 function adminFileRows() { return $$("[data-admin-file-row]").map((row) => row.dataset.adminFileRow); }
 function syncAdminSelection() {
   $$("[data-admin-file-row]").forEach((row) => { const selected = state.adminSelection.has(row.dataset.adminFileRow); row.classList.toggle("is-selected", selected); row.setAttribute("aria-selected", selected); });
@@ -383,22 +407,55 @@ function renderAdminManager() {
     return `<section class="admin-folder-node"><button class="admin-folder-row" data-admin-folder="${esc(node.path)}" style="--depth:${depth}" aria-expanded="${!collapsed}"><span class="admin-folder-chevron">${hasChildren ? (collapsed ? "▶" : "▼") : "·"}</span><span class="admin-folder-icon">▱</span><strong>${esc(node.name)}</strong><small>${node.files.length} file${node.files.length === 1 ? "" : "s"}</small></button><div class="admin-children ${collapsed ? "is-collapsed" : ""}">${node.folders.map((child) => branch(child, depth + 1)).join("")}${node.files.map((file) => fileRow(file, depth + 1)).join("")}</div></section>`;
   };
   const visible = state.adminFiles.filter((file) => file.visible).length;
+  const role = state.adminRoles.find((item) => item.id === state.adminRoleId);
+  const roleOptions = state.adminRoles.filter((item) => !item.isAdmin).map((item) => `<option value="${item.id}" ${item.id === state.adminRoleId ? "selected" : ""}>${esc(item.name)}</option>`).join("");
   const tree = roots.map((node) => branch(node)).join("");
-  view.innerHTML = `<div class="document-header"><div class="eyebrow">Administration</div><h1>File visibility</h1><div class="document-meta">${visible} of ${state.adminFiles.length} files visible · Click a row to select, Ctrl-click to add or remove, Shift-click for a range</div></div><div class="admin-toolbar"><button class="button ghost" data-action="admin-expand-all">Expand all</button><button class="button ghost" data-action="admin-collapse-all">Collapse all</button><span id="admin-selection-count">${state.adminSelection.size} selected</span><button class="button ghost" data-action="admin-hide-selected">Hide selected</button><button class="button" data-action="admin-show-selected">Show selected</button><button class="button ghost" data-action="admin-logout">Lock</button></div><div class="admin-tree" role="listbox" aria-multiselectable="true">${tree || `<div class="empty-state">No article folders were found.</div>`}</div>`;
+  view.innerHTML = `<div class="document-header"><div class="eyebrow">Administration</div><h1>File visibility</h1><div class="document-meta">${visible} of ${state.adminFiles.length} files visible to ${esc(role.name)} · Users receive the combined access of all assigned roles</div></div><div class="visibility-role-picker"><label>Editing visibility for <select id="visibility-role">${roleOptions}</select></label></div><div class="admin-toolbar"><button class="button ghost" data-action="admin-expand-all">Expand all</button><button class="button ghost" data-action="admin-collapse-all">Collapse all</button><span id="admin-selection-count">${state.adminSelection.size} selected</span><button class="button ghost" data-action="admin-hide-selected">Hide selected</button><button class="button" data-action="admin-show-selected">Show selected</button></div><div class="admin-tree" role="listbox" aria-multiselectable="true">${tree || `<div class="empty-state">No article folders were found.</div>`}</div>`;
 }
 async function updateAdminVisibility(paths, visible) {
   if (!paths.length) return toast("Select at least one file");
   try {
-    await adminApi("/api/admin/visibility", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ paths, visible }) });
+    await api("/api/admin/visibility", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ roleId: state.adminRoleId, paths, visible }) });
     await Promise.all([loadAdminFiles(), loadFiles(true)]); state.adminSelection.clear(); state.adminAnchor = null; renderAdminManager(); toast(`${paths.length} file${paths.length === 1 ? "" : "s"} ${visible ? "shown" : "hidden"}`);
   } catch (error) { toast(error.message); }
 }
-async function unlockAdmin() {
-  const password = $("#admin-password")?.value || ""; sessionStorage.setItem("folder-wiki-admin-password", password);
-  try { await loadAdminFiles(); renderAdminManager(); }
-  catch (error) { sessionStorage.removeItem("folder-wiki-admin-password"); renderAdminLogin(error.message); }
+function roleChoices(selected = [], prefix = "role") {
+  const chosen = new Set(selected.map((role) => typeof role === "object" ? role.id : role));
+  return state.adminRoles.map((role) => `<label class="role-choice"><input type="checkbox" data-role-choice="${prefix}" value="${role.id}" ${chosen.has(role.id) ? "checked" : ""}><span>${esc(role.name)}</span><small>${role.isAdmin ? "Admin" : "Viewer"}</small></label>`).join("");
 }
-
+function selectedRoleIds(form, prefix) { return $$(`[data-role-choice="${prefix}"]:checked`, form).map((input) => Number(input.value)); }
+async function refreshSessionUser() { showApp(await api("/api/auth/me")); }
+async function renderUserManagement() {
+  if (!state.user.isAdmin) return navigate("#home");
+  setChrome("User management"); $(".primary-nav [data-action=users]").classList.add("active");
+  try {
+    const [users, roles] = await Promise.all([api("/api/admin/users"), api("/api/admin/roles")]); state.adminRoles = roles;
+    const roleRows = roles.map((role) => `<form class="management-row role-management-row" data-role-form="${role.id}"><input class="management-name" name="name" value="${esc(role.name)}" aria-label="Role name"><select name="isAdmin" ${role.isSystem ? "disabled" : ""}><option value="false" ${role.isAdmin ? "" : "selected"}>Viewer</option><option value="true" ${role.isAdmin ? "selected" : ""}>Admin</option></select><span class="management-meta">${role.userCount} user${role.userCount === 1 ? "" : "s"} · ${role.fileCount} files${role.isSystem ? " · Default" : ""}</span><button class="button ghost" type="submit">Save</button>${role.isSystem ? "" : `<button class="danger-button" type="button" data-delete-role="${role.id}">Delete</button>`}</form>`).join("");
+    const userRows = users.map((user) => `<form class="management-user" data-user-form="${user.id}"><div class="management-user-head"><input class="management-name" name="username" value="${esc(user.username)}" aria-label="Username"><span>Joined ${formatDate(user.joinedAt)} · Last login ${user.lastLogin ? formatDate(user.lastLogin) : "Never"}</span></div><div class="role-choice-grid">${roleChoices(user.roles, `user-${user.id}`)}</div><div class="management-user-actions"><input name="password" type="password" minlength="8" placeholder="New password (optional)" autocomplete="new-password"><button class="button" type="submit">Save user</button>${user.id === state.user.id ? "" : `<button class="danger-button" type="button" data-delete-user="${user.id}">Delete</button>`}</div></form>`).join("");
+    view.innerHTML = `<div class="document-header"><div class="eyebrow">Administration</div><h1>User management</h1><div class="document-meta">Create accounts, combine roles, and control whether each role has viewer or administrator permissions.</div></div><section class="management-section"><div class="section-head"><h2>Roles</h2></div><form class="management-create" id="create-role-form"><input name="name" placeholder="New role name" required minlength="2" maxlength="40"><select name="isAdmin"><option value="false">Viewer role</option><option value="true">Admin role</option></select><button class="button" type="submit">Add role</button></form><div class="management-list">${roleRows}</div></section><section class="management-section"><div class="section-head"><h2>Users</h2></div><form class="management-create-user" id="create-user-form"><div><input name="username" placeholder="Username" required minlength="3" maxlength="32"><input name="password" type="password" placeholder="Temporary password" required minlength="8" maxlength="256" autocomplete="new-password"></div><div class="role-choice-grid">${roleChoices([], "new-user")}</div><button class="button" type="submit">Create user</button></form><div class="management-users">${userRows}</div></section>`;
+  } catch (error) { view.innerHTML = `<div class="empty-state">${esc(error.message)}</div>`; }
+}
+async function saveRoleForm(form) {
+  const id = Number(form.dataset.roleForm); const current = state.adminRoles.find((role) => role.id === id);
+  const input = { name: form.elements.name.value, isAdmin: current.isSystem ? current.isAdmin : form.elements.isAdmin.value === "true" };
+  try { await api(`/api/admin/roles/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input) }); await refreshSessionUser(); toast("Role updated"); renderUserManagement(); } catch (error) { toast(error.message); }
+}
+async function createRoleForm(form) {
+  const input = { name: form.elements.name.value, isAdmin: form.elements.isAdmin.value === "true" };
+  try { await api("/api/admin/roles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) }); toast("Role created"); renderUserManagement(); } catch (error) { toast(error.message); }
+}
+async function saveUserForm(form) {
+  const id = Number(form.dataset.userForm); const input = { username: form.elements.username.value, password: form.elements.password.value, roleIds: selectedRoleIds(form, `user-${id}`) };
+  try { await api(`/api/admin/users/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input) }); await refreshSessionUser(); toast("User updated"); renderUserManagement(); } catch (error) { toast(error.message); }
+}
+async function createUserForm(form) {
+  const input = { username: form.elements.username.value, password: form.elements.password.value, roleIds: selectedRoleIds(form, "new-user") };
+  try { await api("/api/admin/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) }); toast("User created"); renderUserManagement(); } catch (error) { toast(error.message); }
+}
+async function deleteManaged(kind, id) {
+  if (!window.confirm(`Delete this ${kind}? This cannot be undone.`)) return;
+  try { await api(`/api/admin/${kind}s/${id}`, { method: "DELETE" }); toast(`${kind === "user" ? "User" : "Role"} deleted`); renderUserManagement(); } catch (error) { toast(error.message); }
+}
 function openSearch() { $("#search-modal").classList.remove("hidden"); $("#search-input").focus(); }
 function closeSearch() { $("#search-modal").classList.add("hidden"); }
 let searchTimer;
@@ -425,7 +482,9 @@ function openImage(src, title) {
   $("img", lightbox).src = src; $("img", lightbox).alt = title || ""; $("div", lightbox).textContent = title || "";
 }
 async function route() {
+  if (!state.user) return showAuth();
   const hash = location.hash || "#home"; const [routeName, encoded] = hash.slice(1).split("/");
+  if (!state.user.isAdmin && ["gm", "admin", "users", "new"].includes(routeName)) return navigate("#home");
   if (["home", "article", "folder", "file", "all", "pinned"].includes(routeName)) await loadFiles(true);
   if (routeName === "article" || routeName === "folder") return openArticle(decodeURIComponent(encoded || ""));
   if (routeName === "file") { const file = state.files.find((item) => item.path === decodeURIComponent(encoded || "")); return file ? openArticle(file.folder) : renderNotFound(); }
@@ -433,12 +492,14 @@ async function route() {
   if (routeName === "pinned") { const pins = pinned(); return renderList("Pinned articles", state.articles.filter((article) => pins.includes(article.path)), "A short shelf of references you want close at hand."); }
   if (routeName === "gm") return renderGM();
   if (routeName === "admin") return renderAdmin();
+  if (routeName === "users") return renderUserManagement();
   if (routeName === "new") return renderEditor();
   renderHome();
 }
 async function loadFiles(refresh = false) { const suffix = refresh ? "?refresh=1" : ""; state.files = await api(`/api/files${suffix}`); state.folderPaths = await api(`/api/folders${suffix}`); buildArticles(); buildTree(); }
 
 document.addEventListener("click", async (event) => {
+  const authMode = event.target.closest("[data-auth-mode]"); if (authMode) return setAuthMode(authMode.dataset.authMode);
   const markdownTool = event.target.closest("[data-md-command]");
   if (markdownTool) return runMarkdownCommand(markdownTool.dataset.mdCommand);
   const editSource = event.target.closest("[data-edit-file]");
@@ -455,11 +516,13 @@ document.addEventListener("click", async (event) => {
   if (adminFolder) { const path = adminFolder.dataset.adminFolder; state.adminCollapsed.has(path) ? state.adminCollapsed.delete(path) : state.adminCollapsed.add(path); return renderAdminManager(); }
   const adminRow = event.target.closest("[data-admin-file-row]");
   if (adminRow) return selectAdminRow(adminRow.dataset.adminFileRow, event);
+  const deleteRole = event.target.closest("[data-delete-role]"); if (deleteRole) return deleteManaged("role", deleteRole.dataset.deleteRole);
+  const deleteUser = event.target.closest("[data-delete-user]"); if (deleteUser) return deleteManaged("user", deleteUser.dataset.deleteUser);
   const die = event.target.closest("[data-die]"); if (die) { const sides = Number(die.dataset.die); $("#dice-result").textContent = Math.floor(Math.random() * sides) + 1; return; }
   const remove = event.target.closest("[data-init-remove]"); if (remove) { const list = initiatives(); list.splice(Number(remove.dataset.initRemove), 1); localStorage.setItem(STORAGE.initiative, JSON.stringify(list)); return renderInitiative(); }
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
-  if (["home","all","pinned","gm","admin","new"].includes(action)) return navigate(`#${action}`);
+  if (["home","all","pinned","gm","admin","users","new"].includes(action)) return navigate(`#${action}`);
   if (action === "search") return openSearch();
   if (action === "menu") return $("#sidebar").classList.toggle("open");
   if (action === "collapse") return $$(".tree-folder").forEach((node) => node.classList.add("closed"));
@@ -473,17 +536,24 @@ document.addEventListener("click", async (event) => {
   if (action === "admin-collapse-all") { state.folderPaths.forEach((folder) => state.adminCollapsed.add(folder)); return renderAdminManager(); }
   if (action === "admin-show-selected") return updateAdminVisibility(selectedAdminPaths(), true);
   if (action === "admin-hide-selected") return updateAdminVisibility(selectedAdminPaths(), false);
-  if (action === "admin-logout") { sessionStorage.removeItem("folder-wiki-admin-password"); return renderAdminLogin(); }
+  if (action === "logout") { try { await api("/api/auth/logout", { method: "POST" }); } finally { location.hash = ""; showAuth(); } }
 });
 document.addEventListener("change", (event) => {
   if (event.target.matches("[data-init-name],[data-init-score]")) { updateInitiative(); renderInitiative(); }
   if (event.target.matches("[data-admin-visible]")) updateAdminVisibility([event.target.dataset.adminVisible], event.target.checked);
+  if (event.target.matches("#visibility-role")) { state.adminRoleId = Number(event.target.value); state.adminSelection.clear(); state.adminAnchor = null; loadAdminFiles().then(renderAdminManager).catch((error) => toast(error.message)); }
 });
-document.addEventListener("submit", (event) => { if (event.target.matches(".admin-login")) { event.preventDefault(); unlockAdmin(); } });
+document.addEventListener("submit", (event) => {
+  if (event.target.matches("#auth-form")) { event.preventDefault(); submitAuth(); }
+  if (event.target.matches("#create-role-form")) { event.preventDefault(); createRoleForm(event.target); }
+  if (event.target.matches("[data-role-form]")) { event.preventDefault(); saveRoleForm(event.target); }
+  if (event.target.matches("#create-user-form")) { event.preventDefault(); createUserForm(event.target); }
+  if (event.target.matches("[data-user-form]")) { event.preventDefault(); saveUserForm(event.target); }
+});
 $("#search-modal").addEventListener("click", (event) => { if (event.target === $("#search-modal")) closeSearch(); });
 $("#search-input").addEventListener("input", (event) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => runSearch(event.target.value), 180); });
 document.addEventListener("keydown", (event) => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openSearch(); }
+  if (state.user && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openSearch(); }
   const adminOpen = Boolean($(".admin-tree")); const typing = event.target.matches("input,textarea,[contenteditable=true]");
   if (adminOpen && !typing && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") { event.preventDefault(); state.adminSelection = new Set(adminFileRows()); state.adminAnchor = adminFileRows().at(-1) || null; syncAdminSelection(); }
   if (event.key === "Escape") { if (!$("#search-modal").classList.contains("hidden")) closeSearch(); else if (adminOpen) { state.adminSelection.clear(); state.adminAnchor = null; syncAdminSelection(); } }
@@ -491,4 +561,10 @@ document.addEventListener("keydown", (event) => {
 });
 window.addEventListener("hashchange", route);
 
-try { await loadFiles(); await route(); } catch (error) { view.innerHTML = `<div class="empty-state"><h1>Could not open the wiki</h1><p>${esc(error.message)}</p></div>`; }
+async function boot() {
+  try {
+    const response = await fetch("/api/auth/me"); if (!response.ok) return showAuth();
+    showApp(await response.json()); await loadFiles(); await route();
+  } catch (error) { showAuth(error.message); }
+}
+await boot();

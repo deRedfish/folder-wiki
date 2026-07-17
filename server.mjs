@@ -5,13 +5,14 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ADMIN_PASSWORD } from "./config.mjs";
+import { AuthStore } from "./auth.mjs";
 
 const execFileAsync = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTENT_ROOT = path.resolve(process.env.CONTENT_ROOT || path.join(HERE, "content"));
 const RUNTIME_ROOT = path.resolve(process.env.RUNTIME_ROOT || path.join(HERE, ".folder-wiki"));
 const VISIBILITY_FILE = path.join(RUNTIME_ROOT, "visibility.json");
+const DATABASE_FILE = path.join(RUNTIME_ROOT, "wiki.db");
 const PUBLIC = path.join(HERE, "public");
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -19,9 +20,10 @@ const SUPPORTED = new Set([".md", ".markdown", ".txt", ".json", ".pdf", ".png", 
 const TEXT_TYPES = new Set([".md", ".markdown", ".txt", ".json"]);
 const IMAGE_TYPES = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif", ".svg"]);
 const IGNORED = new Set([".git", ".vscode", "node_modules"]);
-const MIME = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif", ".svg": "image/svg+xml", ".zip": "application/zip" };
+const MIME = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif", ".svg": "image/svg+xml", ".zip": "application/zip" };
 
-let cache = { at: 0, files: [], folders: [], search: [], admin: [] };
+let cache = { at: 0, files: [], folders: [], search: [] };
+let auth;
 const textCache = new Map();
 const pdfPending = new Set();
 
@@ -44,21 +46,29 @@ async function hiddenPaths() {
   }
 }
 
-async function saveHiddenPaths(hidden) {
-  await mkdir(RUNTIME_ROOT, { recursive: true });
-  await writeFile(VISIBILITY_FILE, JSON.stringify({ hidden: [...hidden].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) }, null, 2) + "\n", "utf8");
+function cookies(req) {
+  return Object.fromEntries(String(req.headers.cookie || "").split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
+    const at = part.indexOf("="); return [decodeURIComponent(part.slice(0, at)), decodeURIComponent(part.slice(at + 1))];
+  }));
 }
-
-function requireAdmin(req) {
-  if (req.headers["x-admin-password"] !== ADMIN_PASSWORD) {
-    const error = new Error("Incorrect admin password"); error.status = 401; throw error;
+function sessionToken(req) { return cookies(req).folder_wiki_session || ""; }
+function currentUser(req) { return auth.session(sessionToken(req)); }
+function authError(message, status) { const error = new Error(message); error.status = status; return error; }
+function requireUser(req) { const user = currentUser(req); if (!user) throw authError("Login required", 401); return user; }
+function requireAdmin(user) { if (!user.isAdmin) throw authError("Admin access required", 403); }
+function sessionCookie(session) { return `folder_wiki_session=${encodeURIComponent(session.token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${session.maxAgeSeconds}`; }
+function clearSessionCookie() { return "folder_wiki_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"; }
+function userPaths(user) { return auth.visiblePaths(user.id); }
+function canView(user, file) { const allowed = userPaths(user); return allowed === null || allowed.has(relative(file)); }
+function requireVisible(user, file) { if (!canView(user, file)) { const error = new Error("Not found"); error.code = "ENOENT"; throw error; } }
+function visibleRecords(index, user) { const allowed = userPaths(user); return allowed === null ? index.files : index.files.filter((file) => allowed.has(file.path)); }
+function visibleFolders(index, user) {
+  if (user.isAdmin) return index.folders;
+  const folders = new Set();
+  for (const file of visibleRecords(index, user)) {
+    const parts = file.folder.split("/"); for (let i = 1; i <= parts.length; i++) folders.add(parts.slice(0, i).join("/"));
   }
-}
-
-async function requireVisible(file) {
-  if ((await hiddenPaths()).has(relative(file))) {
-    const error = new Error("Not found"); error.code = "ENOENT"; throw error;
-  }
+  return index.folders.filter((folder) => folders.has(folder));
 }
 
 async function walk(directory, output = []) {
@@ -104,7 +114,7 @@ async function searchableText(file, info) {
 async function buildIndex(force = false) {
   if (!force && Date.now() - cache.at < 2000) return cache;
   const [paths, folders] = await Promise.all([walk(CONTENT_ROOT), walkFolders(CONTENT_ROOT)]);
-  const hidden = await hiddenPaths();
+  const legacyHidden = await hiddenPaths();
   const pdfQueue = [];
   const articlePaths = paths.filter((file) => path.dirname(file) !== CONTENT_ROOT);
   const records = await Promise.all(articlePaths.map(async (file) => {
@@ -130,9 +140,9 @@ async function buildIndex(force = false) {
     };
   }));
   records.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
-  const visible = records.filter((item) => !hidden.has(item.path));
   const clean = (item) => { const { _content, _lower, ...record } = item; return record; };
-  cache = { at: Date.now(), files: visible.map(clean), folders: folders.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), search: visible, admin: records.map((item) => ({ ...clean(item), visible: !hidden.has(item.path) })) };
+  auth.syncFiles(records.map((item) => item.path), legacyHidden);
+  cache = { at: Date.now(), files: records.map(clean), folders: folders.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), search: records };
   for (const job of pdfQueue) queuePdf(job.file, job.info);
   return cache;
 }
@@ -146,9 +156,9 @@ function queuePdf(file, info) {
   }).finally(() => pdfPending.delete(file));
 }
 
-function json(res, value, status = 200) {
+function json(res, value, status = 200, headers = {}) {
   const body = JSON.stringify(value);
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(body), "cache-control": "no-store" });
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(body), "cache-control": "no-store", ...headers });
   res.end(body);
 }
 function sendError(res, error, status = 400) { json(res, { error: error.message || String(error) }, status); }
@@ -176,36 +186,61 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     if (url.pathname === "/api/health" && req.method === "GET") return json(res, { ok: true });
+    if (url.pathname === "/api/auth/register" && req.method === "POST") {
+      const input = await bodyJson(req); const user = await auth.register(input.username, input.password); const session = auth.createSession(user.id);
+      return json(res, user, 201, { "set-cookie": sessionCookie(session) });
+    }
+    if (url.pathname === "/api/auth/login" && req.method === "POST") {
+      const input = await bodyJson(req); const user = await auth.authenticate(input.username, input.password);
+      if (!user) throw authError("Incorrect username or password", 401);
+      const session = auth.createSession(user.id); return json(res, user, 200, { "set-cookie": sessionCookie(session) });
+    }
+    if (url.pathname === "/api/auth/logout" && req.method === "POST") {
+      auth.deleteSession(sessionToken(req)); return json(res, { ok: true }, 200, { "set-cookie": clearSessionCookie() });
+    }
+    if (url.pathname === "/api/auth/me" && req.method === "GET") return json(res, requireUser(req));
+
+    const user = url.pathname.startsWith("/api/") || url.pathname.startsWith("/content/") ? requireUser(req) : null;
     if (url.pathname === "/api/admin/files" && req.method === "GET") {
-      requireAdmin(req); return json(res, (await buildIndex(true)).admin);
+      requireAdmin(user); const roleId = Number(url.searchParams.get("roleId")); if (!roleId) throw new Error("Choose a role");
+      const role = auth.listRoles().find((item) => item.id === roleId); if (!role) throw new Error("Role not found");
+      const index = await buildIndex(true); const granted = auth.rolePaths(roleId);
+      return json(res, index.files.map((file) => ({ ...file, visible: role.isAdmin || granted.has(file.path) })));
     }
     if (url.pathname === "/api/admin/preview" && req.method === "GET") {
-      if (url.searchParams.get("password") !== ADMIN_PASSWORD) {
-        const error = new Error("Incorrect admin password"); error.status = 401; throw error;
-      }
+      requireAdmin(user);
       const file = safeContentPath(url.searchParams.get("path"));
       if (!IMAGE_TYPES.has(path.extname(file).toLowerCase())) throw new Error("Only image files can be previewed");
       return serveFile(res, file);
     }
     if (url.pathname === "/api/admin/visibility" && req.method === "PUT") {
-      requireAdmin(req);
-      const input = await bodyJson(req); const visible = Boolean(input.visible);
+      requireAdmin(user); const input = await bodyJson(req); const visible = Boolean(input.visible); const roleId = Number(input.roleId);
       if (!Array.isArray(input.paths) || !input.paths.length) throw new Error("Select at least one file");
-      const index = await buildIndex(true); const available = new Set(index.admin.map((item) => item.path));
-      const paths = [...new Set(input.paths.map(String))];
-      if (paths.some((item) => !available.has(item))) throw new Error("One or more files no longer exist");
-      const hidden = await hiddenPaths();
-      for (const item of paths) visible ? hidden.delete(item) : hidden.add(item);
-      await saveHiddenPaths(hidden); cache.at = 0;
+      const role = auth.listRoles().find((item) => item.id === roleId); if (!role) throw new Error("Role not found"); if (role.isAdmin) throw new Error("Admin roles always see all content");
+      const paths = [...new Set(input.paths.map(String))]; await buildIndex(true); auth.setRolePaths(roleId, paths, visible); cache.at = 0;
       return json(res, { ok: true, changed: paths.length, visible });
     }
-    if (url.pathname === "/api/files" && req.method === "GET") return json(res, (await buildIndex(url.searchParams.has("refresh"))).files);
-    if (url.pathname === "/api/folders" && req.method === "GET") return json(res, (await buildIndex(url.searchParams.has("refresh"))).folders);
+    if (url.pathname === "/api/admin/roles" && req.method === "GET") { requireAdmin(user); return json(res, auth.listRoles()); }
+    if (url.pathname === "/api/admin/roles" && req.method === "POST") { requireAdmin(user); const input = await bodyJson(req); return json(res, auth.createRole(input.name, input.isAdmin), 201); }
+    const roleRoute = url.pathname.match(/^\/api\/admin\/roles\/(\d+)$/);
+    if (roleRoute && req.method === "PUT") { requireAdmin(user); return json(res, auth.updateRole(roleRoute[1], await bodyJson(req))); }
+    if (roleRoute && req.method === "DELETE") { requireAdmin(user); auth.deleteRole(roleRoute[1]); return json(res, { ok: true }); }
+    if (url.pathname === "/api/admin/users" && req.method === "GET") { requireAdmin(user); return json(res, auth.listUsers()); }
+    if (url.pathname === "/api/admin/users" && req.method === "POST") { requireAdmin(user); return json(res, await auth.createUser(await bodyJson(req)), 201); }
+    const userRoute = url.pathname.match(/^\/api\/admin\/users\/(\d+)$/);
+    if (userRoute && req.method === "PUT") { requireAdmin(user); return json(res, await auth.updateUser(userRoute[1], await bodyJson(req))); }
+    if (userRoute && req.method === "DELETE") { requireAdmin(user); if (Number(userRoute[1]) === user.id) throw new Error("You cannot delete your own account"); auth.deleteUser(userRoute[1]); return json(res, { ok: true }); }
+    if (url.pathname === "/api/files" && req.method === "GET") {
+      const index = await buildIndex(url.searchParams.has("refresh")); const files = visibleRecords(index, user);
+      return json(res, user.isAdmin ? files.map((file) => ({ ...file, viewerVisible: auth.isVisibleToAnyViewer(file.path) })) : files);
+    }
+    if (url.pathname === "/api/folders" && req.method === "GET") { const index = await buildIndex(url.searchParams.has("refresh")); return json(res, visibleFolders(index, user)); }
     if (url.pathname === "/api/search" && req.method === "GET") {
       const q = (url.searchParams.get("q") || "").trim().toLocaleLowerCase();
       if (!q) return json(res, []);
       const terms = q.split(/\s+/).filter(Boolean);
-      const results = (await buildIndex()).search.map((item) => {
+      const index = await buildIndex(); const allowed = userPaths(user);
+      const results = index.search.filter((item) => allowed === null || allowed.has(item.path)).map((item) => {
         const haystack = `${item.title}\n${item.path}\n${item._lower}`.toLocaleLowerCase();
         if (!terms.every((term) => haystack.includes(term))) return null;
         const titleHit = item.title.toLocaleLowerCase().includes(q) ? 30 : 0;
@@ -217,11 +252,12 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/file" && req.method === "GET") {
       const file = safeContentPath(url.searchParams.get("path"));
-      await requireVisible(file);
+      requireVisible(user, file);
       if (!TEXT_TYPES.has(path.extname(file).toLowerCase())) throw new Error("This file is viewed as media");
       return json(res, { path: relative(file), content: await readFile(file, "utf8") });
     }
     if (url.pathname === "/api/file" && req.method === "PUT") {
+      requireAdmin(user);
       const input = await bodyJson(req);
       const file = safeContentPath(input.path);
       if (![".md", ".markdown"].includes(path.extname(file).toLowerCase())) throw new Error("Pages must use a .md extension");
@@ -232,7 +268,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname.startsWith("/content/") && req.method === "GET") {
       const file = safeContentPath(url.pathname.slice(9));
-      await requireVisible(file);
+      requireVisible(user, file);
       return await serveFile(res, file, url.searchParams.has("download"));
     }
     let file = url.pathname === "/" ? path.join(PUBLIC, "index.html") : path.resolve(PUBLIC, `.${url.pathname}`);
@@ -243,7 +279,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 export async function startServer() {
-  await mkdir(CONTENT_ROOT, { recursive: true });
+  await Promise.all([mkdir(CONTENT_ROOT, { recursive: true }), mkdir(RUNTIME_ROOT, { recursive: true })]);
+  auth = new AuthStore(DATABASE_FILE);
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(PORT, HOST, () => {
