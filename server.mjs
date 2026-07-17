@@ -5,10 +5,13 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ADMIN_PASSWORD } from "./config.mjs";
 
 const execFileAsync = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTENT_ROOT = path.resolve(process.env.CONTENT_ROOT || path.join(HERE, "content"));
+const RUNTIME_ROOT = path.resolve(process.env.RUNTIME_ROOT || path.join(HERE, ".folder-wiki"));
+const VISIBILITY_FILE = path.join(RUNTIME_ROOT, "visibility.json");
 const PUBLIC = path.join(HERE, "public");
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -18,7 +21,7 @@ const IMAGE_TYPES = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif", 
 const IGNORED = new Set([".git", ".vscode", "node_modules"]);
 const MIME = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif", ".svg": "image/svg+xml", ".zip": "application/zip" };
 
-let cache = { at: 0, files: [], folders: [], search: [] };
+let cache = { at: 0, files: [], folders: [], search: [], admin: [] };
 const textCache = new Map();
 const pdfPending = new Set();
 
@@ -29,6 +32,33 @@ export function safeContentPath(value) {
   if (resolved !== CONTENT_ROOT && !resolved.startsWith(CONTENT_ROOT + path.sep)) throw new Error("Invalid path");
   if (relative(resolved).split("/").some((part) => IGNORED.has(part))) throw new Error("That path is reserved");
   return resolved;
+}
+
+async function hiddenPaths() {
+  try {
+    const data = JSON.parse(await readFile(VISIBILITY_FILE, "utf8"));
+    return new Set(Array.isArray(data.hidden) ? data.hidden.map(String) : []);
+  } catch (error) {
+    if (error.code === "ENOENT" || error instanceof SyntaxError) return new Set();
+    throw error;
+  }
+}
+
+async function saveHiddenPaths(hidden) {
+  await mkdir(RUNTIME_ROOT, { recursive: true });
+  await writeFile(VISIBILITY_FILE, JSON.stringify({ hidden: [...hidden].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) }, null, 2) + "\n", "utf8");
+}
+
+function requireAdmin(req) {
+  if (req.headers["x-admin-password"] !== ADMIN_PASSWORD) {
+    const error = new Error("Incorrect admin password"); error.status = 401; throw error;
+  }
+}
+
+async function requireVisible(file) {
+  if ((await hiddenPaths()).has(relative(file))) {
+    const error = new Error("Not found"); error.code = "ENOENT"; throw error;
+  }
 }
 
 async function walk(directory, output = []) {
@@ -74,6 +104,7 @@ async function searchableText(file, info) {
 async function buildIndex(force = false) {
   if (!force && Date.now() - cache.at < 2000) return cache;
   const [paths, folders] = await Promise.all([walk(CONTENT_ROOT), walkFolders(CONTENT_ROOT)]);
+  const hidden = await hiddenPaths();
   const pdfQueue = [];
   const articlePaths = paths.filter((file) => path.dirname(file) !== CONTENT_ROOT);
   const records = await Promise.all(articlePaths.map(async (file) => {
@@ -99,7 +130,9 @@ async function buildIndex(force = false) {
     };
   }));
   records.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
-  cache = { at: Date.now(), files: records.map(({ _content, _lower, ...item }) => item), folders: folders.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), search: records };
+  const visible = records.filter((item) => !hidden.has(item.path));
+  const clean = (item) => { const { _content, _lower, ...record } = item; return record; };
+  cache = { at: Date.now(), files: visible.map(clean), folders: folders.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), search: visible, admin: records.map((item) => ({ ...clean(item), visible: !hidden.has(item.path) })) };
   for (const job of pdfQueue) queuePdf(job.file, job.info);
   return cache;
 }
@@ -143,6 +176,29 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     if (url.pathname === "/api/health" && req.method === "GET") return json(res, { ok: true });
+    if (url.pathname === "/api/admin/files" && req.method === "GET") {
+      requireAdmin(req); return json(res, (await buildIndex(true)).admin);
+    }
+    if (url.pathname === "/api/admin/preview" && req.method === "GET") {
+      if (url.searchParams.get("password") !== ADMIN_PASSWORD) {
+        const error = new Error("Incorrect admin password"); error.status = 401; throw error;
+      }
+      const file = safeContentPath(url.searchParams.get("path"));
+      if (!IMAGE_TYPES.has(path.extname(file).toLowerCase())) throw new Error("Only image files can be previewed");
+      return serveFile(res, file);
+    }
+    if (url.pathname === "/api/admin/visibility" && req.method === "PUT") {
+      requireAdmin(req);
+      const input = await bodyJson(req); const visible = Boolean(input.visible);
+      if (!Array.isArray(input.paths) || !input.paths.length) throw new Error("Select at least one file");
+      const index = await buildIndex(true); const available = new Set(index.admin.map((item) => item.path));
+      const paths = [...new Set(input.paths.map(String))];
+      if (paths.some((item) => !available.has(item))) throw new Error("One or more files no longer exist");
+      const hidden = await hiddenPaths();
+      for (const item of paths) visible ? hidden.delete(item) : hidden.add(item);
+      await saveHiddenPaths(hidden); cache.at = 0;
+      return json(res, { ok: true, changed: paths.length, visible });
+    }
     if (url.pathname === "/api/files" && req.method === "GET") return json(res, (await buildIndex(url.searchParams.has("refresh"))).files);
     if (url.pathname === "/api/folders" && req.method === "GET") return json(res, (await buildIndex(url.searchParams.has("refresh"))).folders);
     if (url.pathname === "/api/search" && req.method === "GET") {
@@ -161,6 +217,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/file" && req.method === "GET") {
       const file = safeContentPath(url.searchParams.get("path"));
+      await requireVisible(file);
       if (!TEXT_TYPES.has(path.extname(file).toLowerCase())) throw new Error("This file is viewed as media");
       return json(res, { path: relative(file), content: await readFile(file, "utf8") });
     }
@@ -175,13 +232,14 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname.startsWith("/content/") && req.method === "GET") {
       const file = safeContentPath(url.pathname.slice(9));
+      await requireVisible(file);
       return await serveFile(res, file, url.searchParams.has("download"));
     }
     let file = url.pathname === "/" ? path.join(PUBLIC, "index.html") : path.resolve(PUBLIC, `.${url.pathname}`);
     if (!file.startsWith(PUBLIC + path.sep) && file !== path.join(PUBLIC, "index.html")) throw new Error("Invalid path");
     try { return await serveFile(res, file); }
     catch { return await serveFile(res, path.join(PUBLIC, "index.html")); }
-  } catch (error) { sendError(res, error, error.code === "ENOENT" ? 404 : 400); }
+  } catch (error) { sendError(res, error, error.status || (error.code === "ENOENT" ? 404 : 400)); }
 });
 
 export async function startServer() {

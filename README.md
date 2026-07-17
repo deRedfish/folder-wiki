@@ -94,17 +94,42 @@ Unsupported files are ignored rather than exposed by the server.
 
 The built-in renderer supports headings, paragraphs, emphasis, links, images, blockquotes, ordered and unordered lists, fenced code blocks, horizontal rules, and tables. `##`, `###`, and `####` headings populate the article's table of contents.
 
-An article with exactly one `.md` or `.markdown` source can be edited from its **Edit page** button. When several Markdown sources share an article, they are displayed as separately labeled sources and should be edited on disk.
+Every `.md` or `.markdown` source has an **Edit source** button in its article, including articles that contain several Markdown files. An article with exactly one editable source also shows the top-level **Edit page** shortcut. Saving writes directly to that Markdown file inside `content/`.
+
+The editor includes high-contrast, color-only Markdown syntax highlighting and a live rendered preview. The source pane does not imitate rendered bold, italic, underline, or strikethrough; colors distinguish the syntax while the adjacent preview shows the final typography.
+
+Selection-aware controls cover bold, italic, H1–H4 headings, links with optional titles, inline code, block quotes, lists, and horizontal rules. The link control asks for its URL and optional title while retaining selected text as the visible label. Select text and click another formatting control to wrap or toggle its Markdown markers. Editor shortcuts include `Ctrl+B`/`Cmd+B` for bold, `Ctrl+I`/`Cmd+I` for italic, `Ctrl+K`/`Cmd+K` for a titled link, `Ctrl+Alt+1` through `Ctrl+Alt+4` for heading levels, `Ctrl+Shift+7`/`Cmd+Shift+7` for a numbered list, `Ctrl+Shift+8`/`Cmd+Shift+8` for a bulleted list, `Ctrl+S`/`Cmd+S` to save, and `Tab`/`Shift+Tab` to indent or outdent selected lines.
+
+Use **Format** or `Ctrl+Shift+F`/`Cmd+Shift+F` to normalize Markdown spacing, list markers, headings, quotes, horizontal rules, redundant blank lines, and trailing whitespace. Meaningful two-space line breaks are retained, and fenced code contents are not reformatted.
 
 ## Search
 
-Press `Ctrl+K` anywhere in the app. Search matches all entered terms against article titles, paths, and supported text sources.
+Press `Ctrl+K` anywhere outside the Markdown editor. Search matches all entered terms against article titles, paths, and supported text sources. Inside the editor, `Ctrl+K` formats the selection as a link.
 
 PDF text extraction is intentionally optional. If the `pdftotext` command is available, PDFs are indexed quietly in the background after startup. A common Windows source is Poppler; MiKTeX installations may also provide the command.
 
+## File visibility administration
+
+Open **File visibility** in the sidebar and enter the local admin password. The default is:
+
+```text
+gmrules
+```
+
+Change `ADMIN_PASSWORD` in [`config.mjs`](config.mjs) and restart the server to use another password. This is deliberately a simple local gate, not a secure user or authentication system.
+
+The manager mirrors the real `content/` hierarchy as a collapsible file tree. Expand or collapse folders to navigate deeply nested articles, and use the thumbnail beside an image file as a quick visual reference. Each file has its own **Visible** checkbox.
+
+For bulk changes, click anywhere on a file row to select it. Use `Ctrl`-click (or `Cmd`-click on macOS) to add or remove individual rows, and `Shift`-click to select a range from the previous selection. `Ctrl+A`/`Cmd+A` selects all files currently revealed in expanded folders, and `Escape` clears the selection. **Show selected** and **Hide selected** apply the visibility change to the selected rows.
+
+Hidden files are removed from article pages, file counts, search results, text APIs, and direct media URLs. Their files remain untouched on disk, and they can be restored from the manager at any time. New files are visible by default.
+
+Visibility choices are stored in `.folder-wiki/visibility.json`. That runtime directory is Git-ignored and should not be committed.
+
 ## Local browser data
 
-Pinned articles, initiative entries, and GM scratch notes are stored in your browser's local storage. They are not written into `content/` and are not synchronized between browsers.
+
+Pinned articles, initiative entries, and GM scratch notes are stored in your browser's local storage. The entered admin password is retained only in the browser tab's session storage. None of these values are written into `content/` or synchronized between browsers.
 
 ## Configuration
 
@@ -140,7 +165,7 @@ There is no proprietary data format. Back up the `content/` directory with your 
 npm test
 ```
 
-The test suite performs syntax checks, path-containment checks, title parsing, and a clean-start HTTP smoke test. GitHub Actions runs it on Windows for every push and pull request.
+The test suite performs syntax checks, path-containment checks, title parsing, clean-start HTTP smoke tests, and end-to-end admin visibility checks. GitHub Actions runs it on Windows for every push and pull request.
 
 ## License
 
