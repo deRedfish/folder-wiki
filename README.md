@@ -99,7 +99,7 @@ The built-in renderer supports headings, paragraphs, emphasis, links, images, bl
 
 Every `.md` or `.markdown` source has an **Edit source** button in its article, including articles that contain several Markdown files. An article with exactly one editable source also shows the top-level **Edit page** shortcut. Saving writes directly to that Markdown file inside `content/`.
 
-The editor includes high-contrast, color-only Markdown syntax highlighting and a live rendered preview. The source pane does not imitate rendered bold, italic, underline, or strikethrough; colors distinguish the syntax while the adjacent preview shows the final typography.
+The editor includes high-contrast, color-only Markdown syntax highlighting and a live rendered preview. The source pane does not imitate rendered bold, italic, underline, or strikethrough; colors distinguish the syntax while the adjacent preview shows the final typography. The source and preview panes scroll independently within the available browser height, so the formatting toolbar remains in reach while working through long files.
 
 Selection-aware controls cover bold, italic, H1–H4 headings, links with optional titles, inline code, block quotes, lists, and horizontal rules. The link control asks for its URL and optional title while retaining selected text as the visible label. Select text and click another formatting control to wrap or toggle its Markdown markers. Editor shortcuts include `Ctrl+B`/`Cmd+B` for bold, `Ctrl+I`/`Cmd+I` for italic, `Ctrl+K`/`Cmd+K` for a titled link, `Ctrl+Alt+1` through `Ctrl+Alt+4` for heading levels, `Ctrl+Shift+7`/`Cmd+Shift+7` for a numbered list, `Ctrl+Shift+8`/`Cmd+Shift+8` for a bulleted list, `Ctrl+S`/`Cmd+S` to save, and `Tab`/`Shift+Tab` to indent or outdent selected lines.
 
@@ -123,7 +123,7 @@ Role access is cumulative. A user assigned Player and Gnome sees every file gran
 
 Open **File visibility** as an administrator and choose the viewer role whose access you want to edit.
 
-The manager mirrors the real `content/` hierarchy as a collapsible file tree. Expand or collapse folders to navigate deeply nested articles, and use the thumbnail beside an image file as a quick visual reference. Each file has its own **Visible** checkbox.
+The manager mirrors the real `content/` hierarchy as a collapsible file tree. Expand or collapse folders to navigate deeply nested articles, and use the thumbnail beside an image file as a quick visual reference. Each file has its own **Visible** checkbox. Every folder also has a tri-state **Select all** control: it selects or deselects every file in that folder and all of its subfolders, including descendants hidden inside collapsed branches.
 
 For bulk changes, click anywhere on a file row to select it. Use `Ctrl`-click (or `Cmd`-click on macOS) to add or remove individual rows, and `Shift`-click to select a range from the previous selection. `Ctrl+A`/`Cmd+A` selects all files currently revealed in expanded folders, and `Escape` clears the selection. **Show selected** and **Hide selected** apply the visibility change to the selected rows.
 
