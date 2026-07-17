@@ -1,5 +1,6 @@
 import { prettifyMarkdown } from "./editor-utils.mjs";
 import { filesInFolder, folderSelectionStatus, foldersInFolder, folderVisibilityStatus } from "./admin-utils.mjs";
+import { articleHash, parseRouteHash } from "./route-utils.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -192,7 +193,7 @@ async function openArticle(path) {
     const empty = !article.files.length && !article.children.length ? `<div class="empty-state">This article is empty. Add content to <strong>${esc(article.path)}</strong> and it will appear here.</div>` : "";
     const headings = loaded.flatMap((item) => item.headings).filter((heading) => heading.level > 1);
     const childLinks = article.children.length ? `<nav class="article-rail-section"><strong>Child articles</strong>${article.children.map((child) => `<a class="child-article-link" data-article="${esc(child.path)}" href="#article/${encodeURIComponent(child.path)}"><span>▱</span><span><b>${esc(child.title)}</b><small>${child.files.length} source${child.files.length === 1 ? "" : "s"} · ${child.children.length} child${child.children.length === 1 ? "" : "ren"}</small></span><i>→</i></a>`).join("")}</nav>` : "";
-    const tocLinks = headings.length ? `<nav class="article-rail-section"><strong>On this page</strong>${headings.map((heading) => `<a data-level="${heading.level}" href="#${heading.id}">${esc(heading.label)}</a>`).join("")}</nav>` : "";
+    const tocLinks = headings.length ? `<nav class="article-rail-section"><strong>On this page</strong>${headings.map((heading) => `<a data-level="${heading.level}" data-article-heading="${heading.id}" href="${articleHash(article.path, heading.id)}">${esc(heading.label)}</a>`).join("")}</nav>` : "";
     const rail = childLinks || tocLinks ? `<aside class="article-rail">${childLinks}${tocLinks}</aside>` : "";
     view.innerHTML = `<div class="article-shell">${header}<div class="page-layout"><article class="article-content">${gallery}${markdown}${pdfs}${downloadList}${empty}</article>${rail}</div></div>`;
   } catch (error) { view.innerHTML = `<div class="empty-state">${esc(error.message)}</div>`; }
@@ -503,10 +504,10 @@ function openImage(src, title) {
 }
 async function route() {
   if (!state.user) return showAuth();
-  const hash = location.hash || "#home"; const [routeName, encoded] = hash.slice(1).split("/");
+  const { routeName, encoded, heading } = parseRouteHash(location.hash || "#home");
   if (!state.user.isAdmin && ["gm", "admin", "users", "new"].includes(routeName)) return navigate("#home");
   if (["home", "article", "folder", "file", "all", "pinned"].includes(routeName)) await loadFiles(true);
-  if (routeName === "article" || routeName === "folder") return openArticle(decodeURIComponent(encoded || ""));
+  if (routeName === "article" || routeName === "folder") { await openArticle(decodeURIComponent(encoded || "")); if (heading) requestAnimationFrame(() => document.getElementById(heading)?.scrollIntoView({ block: "start" })); return; }
   if (routeName === "file") { const file = state.files.find((item) => item.path === decodeURIComponent(encoded || "")); return file ? openArticle(file.folder) : renderNotFound(); }
   if (routeName === "all") return renderList("All articles", state.articles);
   if (routeName === "pinned") { const pins = pinned(); return renderList("Pinned articles", state.articles.filter((article) => pins.includes(article.path)), "A short shelf of references you want close at hand."); }
@@ -528,6 +529,8 @@ document.addEventListener("click", async (event) => {
     try { const data = await api(`/api/file?path=${encodeURIComponent(file.path)}`); state.currentFile = file; state.content = data.content; return renderEditor(file); }
     catch (error) { return toast(error.message); }
   }
+  const articleHeading = event.target.closest("[data-article-heading]");
+  if (articleHeading) { event.preventDefault(); history.replaceState(null, "", articleHeading.getAttribute("href")); document.getElementById(articleHeading.dataset.articleHeading)?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
   const articleNode = event.target.closest("[data-article]"); if (articleNode) { closeSearch(); return navigate(`#article/${encodeURIComponent(articleNode.dataset.article)}`); }
   const imageNode = event.target.closest("[data-image]"); if (imageNode) return openImage(imageNode.dataset.image, imageNode.dataset.imageTitle);
   const treeToggle = event.target.closest(".tree-toggle"); if (treeToggle) return treeToggle.closest(".tree-folder").classList.toggle("closed");

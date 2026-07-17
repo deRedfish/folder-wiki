@@ -95,7 +95,7 @@ Unsupported files are ignored rather than exposed by the server.
 
 ## Markdown support
 
-The built-in renderer supports headings, paragraphs, emphasis, links, images, blockquotes, ordered and unordered lists, fenced code blocks, horizontal rules, and tables. `##`, `###`, and `####` headings populate the article's table of contents.
+The built-in renderer supports headings, paragraphs, emphasis, links, images, blockquotes, ordered and unordered lists, fenced code blocks, horizontal rules, and tables. `##`, `###`, and `####` headings populate the article's table of contents. Section links retain the article route, so they scroll within the current article and can be refreshed or bookmarked without returning to the overview.
 
 Article images appear as a prominent visual-reference gallery before long-form text, with the first image shown uncropped as the featured reference and every image available in the full-size lightbox. Child articles and Markdown headings have separate navigation groups in a sticky side rail. On narrow screens, the navigation moves above the article instead of disappearing.
 
