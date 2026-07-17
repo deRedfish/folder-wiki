@@ -95,7 +95,9 @@ Unsupported files are ignored rather than exposed by the server.
 
 ## Markdown support
 
-The built-in renderer supports headings, paragraphs, emphasis, links, images, blockquotes, ordered and unordered lists, fenced code blocks, horizontal rules, and tables. `##`, `###`, and `####` headings populate the article's table of contents.
+The built-in renderer supports headings, paragraphs, emphasis, links, images, blockquotes, ordered and unordered lists, fenced code blocks, horizontal rules, and tables. `##`, `###`, and `####` headings populate the article's table of contents. Section links retain the article route, so they scroll within the current article and can be refreshed or bookmarked without returning to the overview.
+
+Article images appear as a prominent visual-reference gallery before long-form text, with the first image shown uncropped as the featured reference and every image available in the full-size lightbox. Child articles and Markdown headings have separate navigation groups in a sticky side rail. On narrow screens, the navigation moves above the article instead of disappearing.
 
 Every `.md` or `.markdown` source has an **Edit source** button in its article, including articles that contain several Markdown files. An article with exactly one editable source also shows the top-level **Edit page** shortcut. Saving writes directly to that Markdown file inside `content/`.
 
@@ -119,11 +121,13 @@ The default roles are **GM** and **Player**. GM is an administrator role and Pla
 
 Administrators can open **User management** to see usernames, join dates, last-login dates, and assigned roles. They can create, edit, and delete accounts; reset passwords; combine several roles on one account; and add, rename, change, or remove custom roles. Safeguards prevent removing the final administrator or deleting a role while it is someone's only role.
 
-Role access is cumulative. A user assigned Player and Gnome sees every file granted to either Player or Gnome. Administrator roles bypass file visibility entirely and show a warning on articles containing sources hidden from every viewer role.
+Role access is cumulative. A user assigned Player and Gnome sees every file granted to either Player or Gnome. Administrator roles bypass file visibility entirely. Every article shows administrators a yellow access notice listing the viewer roles that can reach it, or stating that no viewer role has access.
 
 Open **File visibility** as an administrator and choose the viewer role whose access you want to edit.
 
-The manager mirrors the real `content/` hierarchy as a collapsible file tree. Expand or collapse folders to navigate deeply nested articles, and use the thumbnail beside an image file as a quick visual reference. Each file has its own **Visible** checkbox. Every folder also has a tri-state **Select all** control: it selects or deselects every file in that folder and all of its subfolders, including descendants hidden inside collapsed branches.
+The manager mirrors the real `content/` hierarchy as a collapsible file tree. Role-visible files are strongly marked in green; hidden files stay neutral; and blue remains reserved for the temporary editing selection. Folder rows summarize all descendants in green, amber, or gray for all, some, or no visible files, so role coverage remains readable when the tree is collapsed. Image files retain thumbnail previews.
+
+Use **Expand all folders** or **Collapse all folders** for the complete tree. Folders with nested folders have a compact tree control in the gutter outside the tree; it expands or collapses that complete branch. The disclosure arrow changes only that folder's expanded state. Clicking the rest of a folder row selects or deselects every descendant file, including descendants hidden inside collapsed branches. Leaf folders omit the redundant tree control.
 
 For bulk changes, click anywhere on a file row to select it. Use `Ctrl`-click (or `Cmd`-click on macOS) to add or remove individual rows, and `Shift`-click to select a range from the previous selection. `Ctrl+A`/`Cmd+A` selects all files currently revealed in expanded folders, and `Escape` clears the selection. **Show selected** and **Hide selected** apply the visibility change to the selected rows.
 

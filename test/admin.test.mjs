@@ -36,12 +36,16 @@ test("role visibility filters viewers while admins bypass restrictions", async (
 
   const adminFiles = await fetch(`${base}/api/files?refresh=1`, withSession(admin.cookie)).then((response) => response.json());
   assert.equal(adminFiles.find((file) => file.path === "Article/secret.md").viewerVisible, false);
+  assert.deepEqual(adminFiles.find((file) => file.path === "Article/secret.md").viewerRoles, []);
+  assert.deepEqual(adminFiles.find((file) => file.path === "Article/public.md").viewerRoles.map((role) => role.name), ["Player"]);
   assert.equal((await fetch(`${base}/api/file?path=${encodeURIComponent("Article/secret.md")}`, withSession(admin.cookie))).status, 200);
   const preview = await fetch(`${base}/api/admin/preview?path=${encodeURIComponent("Article/portrait.png")}`, withSession(admin.cookie));
   assert.equal(preview.status, 200); assert.equal(preview.headers.get("content-type"), "image/png");
 
   const gnome = await fetch(`${base}/api/admin/roles`, withSession(admin.cookie, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Gnome", isAdmin: false }) })).then((response) => response.json());
   await fetch(`${base}/api/admin/visibility`, withSession(admin.cookie, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ roleId: gnome.id, paths: ["Article/secret.md"], visible: true }) }));
+  const roleDetails = await fetch(`${base}/api/files?refresh=1`, withSession(admin.cookie)).then((response) => response.json());
+  assert.deepEqual(roleDetails.find((file) => file.path === "Article/secret.md").viewerRoles.map((role) => role.name), ["Gnome"]);
   const updateViewer = await fetch(`${base}/api/admin/users/${viewer.user.id}`, withSession(admin.cookie, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "adamplayer", password: "", roleIds: [playerRole.id, gnome.id] }) }));
   assert.equal(updateViewer.status, 200);
   const cumulative = await fetch(`${base}/api/files?refresh=1`, withSession(viewer.cookie)).then((response) => response.json());

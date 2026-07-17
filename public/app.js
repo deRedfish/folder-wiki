@@ -1,5 +1,6 @@
 import { prettifyMarkdown } from "./editor-utils.mjs";
-import { filesInFolder, folderSelectionStatus } from "./admin-utils.mjs";
+import { filesInFolder, folderSelectionStatus, foldersInFolder, folderVisibilityStatus } from "./admin-utils.mjs";
+import { articleHash, parseRouteHash } from "./route-utils.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -170,9 +171,9 @@ async function openArticle(path) {
   $("#breadcrumbs").innerHTML = `<button data-action="home">Wiki</button>${breadcrumbParts.map((part, index) => { const target = breadcrumbParts.slice(0, index + 1).join("/"); return `<span>/</span><button data-article="${esc(target)}">${esc(articleTitle(part))}</button>`; }).join("")}`;
   const isPinned = pinned().includes(article.path);
   const totalSize = article.files.reduce((sum, file) => sum + file.size, 0);
-  const restricted = state.user.isAdmin ? article.files.filter((file) => file.viewerVisible === false).length : 0;
-  const warning = restricted ? `<div class="restriction-warning"><strong>Restricted content</strong><span>${restricted === article.files.length ? "This article is hidden from all viewer roles." : `${restricted} source${restricted === 1 ? " is" : "s are"} hidden from all viewer roles.`}</span></div>` : "";
-  const header = `<header class="document-header"><button class="pin-button ${isPinned ? "is-pinned" : ""}" data-action="pin" title="Pin this article">◇</button><div class="eyebrow">Folder article${article.parent ? ` · <button class="inline-link" data-article="${esc(article.parent)}">${esc(articleTitle(article.parent))}</button>` : ""}</div><h1>${esc(article.title)}</h1><div class="document-meta"><span>${article.files.length} direct sources</span><span>${article.children.length} child articles</span>${article.modified ? `<span>Updated ${formatDate(article.modified)}</span>` : ""}${totalSize ? `<span>${formatSize(totalSize)}</span>` : ""}</div></header>${warning}`;
+  const viewerRoleNames = state.user.isAdmin ? [...new Set(state.files.filter((file) => file.folder === article.path || file.folder.startsWith(`${article.path}/`)).flatMap((file) => (file.viewerRoles || []).map((role) => role.name)))].sort((a, b) => a.localeCompare(b)) : [];
+  const accessNotice = state.user.isAdmin ? `<div class="article-access-notice">${viewerRoleNames.length ? `<span>Visible to viewer roles</span><div>${viewerRoleNames.map((role) => `<b>${esc(role)}</b>`).join("")}</div>` : `<span>No viewer roles can access this article.</span>`}</div>` : "";
+  const header = `<header class="document-header"><button class="pin-button ${isPinned ? "is-pinned" : ""}" data-action="pin" title="Pin this article">◇</button><div class="eyebrow">Folder article${article.parent ? ` · <button class="inline-link" data-article="${esc(article.parent)}">${esc(articleTitle(article.parent))}</button>` : ""}</div><h1>${esc(article.title)}</h1><div class="document-meta"><span>${article.files.length} direct sources</span><span>${article.children.length} child articles</span>${article.modified ? `<span>Updated ${formatDate(article.modified)}</span>` : ""}${totalSize ? `<span>${formatSize(totalSize)}</span>` : ""}</div></header>${accessNotice}`;
   try {
     const loaded = await Promise.all(textFiles.map(async (file, index) => {
       const data = await api(`/api/file?path=${encodeURIComponent(file.path)}`);
@@ -180,19 +181,21 @@ async function openArticle(path) {
       return { file, content: data.content, ...rendered };
     }));
     if (isEditable) { state.currentFile = editableFiles[0]; state.content = loaded.find((item) => item.file.path === editableFiles[0].path)?.content || ""; }
-    const childNav = article.children.length ? `<section class="child-articles"><div class="section-kicker">Sub-articles</div><div class="child-grid">${article.children.map((child) => `<article class="child-card" data-article="${esc(child.path)}"><span>▱</span><div><strong>${esc(child.title)}</strong><small>${child.files.length} sources · ${child.children.length} children</small></div><b>→</b></article>`).join("")}</div></section>` : "";
     const markdown = loaded.map((item) => {
       const canEdit = state.user.isAdmin && ["md", "markdown"].includes(item.file.ext);
       return `<section class="article-source prose"><div class="source-toolbar"><div class="source-label">Source · ${esc(item.file.name)}</div>${canEdit ? `<button class="source-edit" data-edit-file="${esc(item.file.path)}">Edit source</button>` : ""}</div>${item.html}</section>`;
     }).join("");
     const pdfs = article.files.filter((file) => file.type === "pdf").map((file) => `<details class="embedded-source" open><summary><span>▥</span><strong>${esc(file.title)}</strong><a href="${contentUrl(file.path)}" target="_blank" title="Open PDF in a new tab">Open separately ↗</a></summary><iframe class="media-view embedded-pdf" loading="lazy" src="${contentUrl(file.path)}" title="${esc(file.title)}"></iframe></details>`).join("");
     const images = article.files.filter((file) => file.type === "image");
-    const gallery = images.length ? `<section class="article-gallery"><div class="section-kicker">Images · ${images.length}</div><div class="image-grid ${images.length === 1 ? "single" : ""}">${images.map((file) => `<figure data-image="${contentUrl(file.path)}" data-image-title="${esc(file.title)}"><img loading="lazy" src="${contentUrl(file.path)}" alt="${esc(file.title)}"><figcaption>${esc(file.title)}</figcaption></figure>`).join("")}</div></section>` : "";
+    const gallery = images.length ? `<section class="article-gallery"><div class="section-kicker">Visual references · ${images.length}</div><div class="image-grid ${images.length === 1 ? "single" : ""}">${images.map((file, index) => `<figure class="${index === 0 ? "featured-image" : ""}" data-image="${contentUrl(file.path)}" data-image-title="${esc(file.title)}"><img loading="${index === 0 ? "eager" : "lazy"}" src="${contentUrl(file.path)}" alt="${esc(file.title)}"><figcaption>${esc(file.title)}</figcaption></figure>`).join("")}</div></section>` : "";
     const downloads = article.files.filter((file) => file.type === "archive");
     const downloadList = downloads.length ? `<section class="article-downloads"><div class="section-kicker">Downloads</div>${downloads.map((file) => `<a class="download-row" href="${contentUrl(file.path)}?download"><span>⬡</span><strong>${esc(file.name)}</strong><small>${formatSize(file.size)}</small><b>Download ↓</b></a>`).join("")}</section>` : "";
     const empty = !article.files.length && !article.children.length ? `<div class="empty-state">This article is empty. Add content to <strong>${esc(article.path)}</strong> and it will appear here.</div>` : "";
     const headings = loaded.flatMap((item) => item.headings).filter((heading) => heading.level > 1);
-    view.innerHTML = `<div class="page-layout"><article>${header}${childNav}${markdown}${pdfs}${gallery}${downloadList}${empty}</article><aside class="toc"><strong>In this article</strong>${article.children.map((child) => `<a data-article="${esc(child.path)}" href="#article/${encodeURIComponent(child.path)}">${esc(child.title)} →</a>`).join("")}${headings.map((heading) => `<a data-level="${heading.level}" href="#${heading.id}">${esc(heading.label)}</a>`).join("") || (!article.children.length ? `<a>No sections</a>` : "")}</aside></div>`;
+    const childLinks = article.children.length ? `<nav class="article-rail-section"><strong>Child articles</strong>${article.children.map((child) => `<a class="child-article-link" data-article="${esc(child.path)}" href="#article/${encodeURIComponent(child.path)}"><span>▱</span><span><b>${esc(child.title)}</b><small>${child.files.length} source${child.files.length === 1 ? "" : "s"} · ${child.children.length} child${child.children.length === 1 ? "" : "ren"}</small></span><i>→</i></a>`).join("")}</nav>` : "";
+    const tocLinks = headings.length ? `<nav class="article-rail-section"><strong>On this page</strong>${headings.map((heading) => `<a data-level="${heading.level}" data-article-heading="${heading.id}" href="${articleHash(article.path, heading.id)}">${esc(heading.label)}</a>`).join("")}</nav>` : "";
+    const rail = childLinks || tocLinks ? `<aside class="article-rail">${childLinks}${tocLinks}</aside>` : "";
+    view.innerHTML = `<div class="article-shell">${header}<div class="page-layout"><article class="article-content">${gallery}${markdown}${pdfs}${downloadList}${empty}</article>${rail}</div></div>`;
   } catch (error) { view.innerHTML = `<div class="empty-state">${esc(error.message)}</div>`; }
 }
 
@@ -202,7 +205,8 @@ function renderEditor(file = null) {
   view.classList.add("editor-view");
   const initial = isEdit ? state.content : "# New page\n\nStart writing here. Use Markdown headings to keep longer articles easy to navigate.\n";
   const tool = (command, label, title, className = "") => `<button type="button" class="${className}" data-md-command="${command}" title="${title}" aria-label="${title}">${label}</button>`;
-  const toolbar = `${tool("bold", "B", "Bold (Ctrl+B)", "md-bold")}${tool("italic", "I", "Italic (Ctrl+I)", "md-italic")}${[1, 2, 3, 4].map((level) => tool(`heading-${level}`, `H${level}`, `Heading level ${level} (Ctrl+Alt+${level})`)).join("")}${tool("link", "↗", "Link with optional title (Ctrl+K)")}${tool("quote", "❯", "Block quote")}${tool("bullet", "• List", "Bulleted list")}${tool("number", "1. List", "Numbered list")}${tool("code", "</>", "Inline code")}${tool("rule", "—", "Horizontal rule")}${tool("format", "Format", "Format Markdown (Ctrl+Shift+F)", "md-format")}`;
+  const linkIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"/></svg>`;
+  const toolbar = `${tool("bold", "B", "Bold (Ctrl+B)", "md-bold")}${tool("italic", "I", "Italic (Ctrl+I)", "md-italic")}${[1, 2, 3, 4].map((level) => tool(`heading-${level}`, `H${level}`, `Heading level ${level} (Ctrl+Alt+${level})`)).join("")}${tool("link", linkIcon, "Link with optional title (Ctrl+K)", "md-link")}${tool("quote", "❯", "Block quote")}${tool("bullet", "• List", "Bulleted list")}${tool("number", "1. List", "Numbered list")}${tool("code", "</>", "Inline code")}${tool("rule", "—", "Horizontal rule")}${tool("format", "Format", "Format Markdown (Ctrl+Shift+F)", "md-format")}`;
   view.innerHTML = `<div class="document-header"><div class="eyebrow">Markdown editor</div><h1>${isEdit ? "Edit entry" : "Create an entry"}</h1><input id="editor-path" class="editor-path" value="${esc(isEdit ? file.path : "Notes/New Page.md")}" ${isEdit ? "readonly" : ""}></div><div class="editor-layout"><section class="editor-pane"><div class="editor-label">Markdown <span>Ctrl+S to save</span></div><div class="markdown-toolbar" role="toolbar" aria-label="Markdown formatting">${toolbar}</div><div class="editor-code-wrap"><pre class="editor-highlight" id="editor-highlight" aria-hidden="true"><code></code></pre><textarea class="editor-text" id="editor-text" spellcheck="true" aria-label="Markdown source"></textarea></div></section><section class="editor-pane"><div class="editor-label">Preview</div><div class="editor-preview prose" id="editor-preview"></div></section></div><div class="editor-actions"><button class="button ghost" data-action="cancel-edit">Cancel</button><button class="button" data-action="save">Save page</button></div>`;
   const editor = $("#editor-text"); editor.value = initial; updateEditor();
   editor.addEventListener("input", updateEditor);
@@ -369,19 +373,18 @@ function adminPreviewUrl(file) { return `/api/admin/preview?path=${encodeURIComp
 function adminFileRows() { return $$("[data-admin-file-row]").map((row) => row.dataset.adminFileRow); }
 function syncAdminSelection() {
   $$("[data-admin-file-row]").forEach((row) => { const selected = state.adminSelection.has(row.dataset.adminFileRow); row.classList.toggle("is-selected", selected); row.setAttribute("aria-selected", selected); });
-  $$("[data-admin-folder-selection]").forEach((button) => {
-    const folder = button.dataset.adminFolderSelection; const paths = filesInFolder(state.adminFiles, folder); const status = folderSelectionStatus(state.adminFiles, folder, state.adminSelection);
-    const selecting = status !== "all"; button.classList.toggle("is-partial", status === "some"); button.classList.toggle("is-all", status === "all"); button.disabled = !paths.length;
-    button.setAttribute("aria-pressed", status === "some" ? "mixed" : status === "all" ? "true" : "false"); button.setAttribute("aria-label", `${selecting ? "Select" : "Deselect"} all ${paths.length} files in ${folder}`); button.title = `${selecting ? "Select" : "Deselect"} this folder and all subfolders`;
-    button.querySelector("span").textContent = status === "all" ? "✓" : status === "some" ? "−" : "";
-    button.querySelector("b").textContent = `${selecting ? "Select" : "Deselect"} all`;
-  });
+  $$("[data-admin-folder-select-row]").forEach((button) => { const status = folderSelectionStatus(state.adminFiles, button.dataset.adminFolderSelectRow, state.adminSelection); button.setAttribute("aria-pressed", status === "some" ? "mixed" : status === "all" ? "true" : "false"); });
   const count = $("#admin-selection-count"); if (count) count.textContent = `${state.adminSelection.size} selected`;
 }
 function toggleAdminFolderSelection(folder) {
   const paths = filesInFolder(state.adminFiles, folder); const allSelected = paths.length && paths.every((path) => state.adminSelection.has(path));
   paths.forEach((path) => allSelected ? state.adminSelection.delete(path) : state.adminSelection.add(path));
   state.adminAnchor = null; syncAdminSelection();
+}
+function toggleAdminFolderBranch(folder) {
+  const paths = foldersInFolder(state.folderPaths, folder); const shouldExpand = paths.some((path) => state.adminCollapsed.has(path));
+  paths.forEach((path) => shouldExpand ? state.adminCollapsed.delete(path) : state.adminCollapsed.add(path));
+  renderAdminManager();
 }
 function selectAdminRow(path, event) {
   const order = adminFileRows(); const additive = event.ctrlKey || event.metaKey;
@@ -412,20 +415,23 @@ function renderAdminManager() {
   const sortByName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
   for (const node of nodes.values()) { node.folders.sort(sortByName); node.files.sort(sortByName); }
   roots.sort(sortByName);
+  const visiblePaths = new Set(state.adminFiles.filter((file) => file.visible).map((file) => file.path));
   const fileRow = (file, depth) => {
     const selected = state.adminSelection.has(file.path);
     const preview = file.type === "image" ? `<img class="admin-preview" loading="lazy" src="${esc(adminPreviewUrl(file))}" alt="">` : `<span class="admin-file-icon">${icons[file.type] || "·"}</span>`;
-    return `<div class="admin-file ${file.visible ? "" : "is-hidden"} ${selected ? "is-selected" : ""}" data-admin-file-row="${esc(file.path)}" style="--depth:${depth}" tabindex="0" role="option" aria-selected="${selected}">${preview}<span class="admin-file-name"><strong>${esc(file.name)}</strong><small>${esc(file.path)}</small></span><label class="visibility-toggle"><input type="checkbox" data-admin-visible="${esc(file.path)}" ${file.visible ? "checked" : ""}><span>Visible</span></label></div>`;
+    return `<div class="admin-file ${file.visible ? "is-visible" : "is-hidden"} ${selected ? "is-selected" : ""}" data-admin-file-row="${esc(file.path)}" style="--depth:${depth}" tabindex="0" role="option" aria-selected="${selected}">${preview}<span class="admin-file-name"><strong>${esc(file.name)}</strong><small>${esc(file.path)}</small></span><label class="visibility-toggle"><input type="checkbox" data-admin-visible="${esc(file.path)}" ${file.visible ? "checked" : ""}><span>Visible</span></label></div>`;
   };
   const branch = (node, depth = 0) => {
     const collapsed = state.adminCollapsed.has(node.path); const hasChildren = node.folders.length || node.files.length; const descendantPaths = filesInFolder(state.adminFiles, node.path); const selectionStatus = folderSelectionStatus(state.adminFiles, node.path, state.adminSelection); const selectAction = selectionStatus === "all" ? "Deselect" : "Select";
-    return `<section class="admin-folder-node"><div class="admin-folder-row" style="--depth:${depth}"><button class="admin-folder-main" data-admin-folder="${esc(node.path)}" aria-expanded="${!collapsed}"><span class="admin-folder-chevron">${hasChildren ? (collapsed ? "▶" : "▼") : "·"}</span><span class="admin-folder-icon">▱</span><strong>${esc(node.name)}</strong><small>${descendantPaths.length} file${descendantPaths.length === 1 ? "" : "s"}</small></button><button class="admin-folder-select ${selectionStatus === "all" ? "is-all" : selectionStatus === "some" ? "is-partial" : ""}" data-admin-folder-selection="${esc(node.path)}" aria-pressed="${selectionStatus === "some" ? "mixed" : selectionStatus === "all"}" aria-label="${selectAction} all ${descendantPaths.length} files in ${esc(node.path)}" title="${selectAction} this folder and all subfolders" ${descendantPaths.length ? "" : "disabled"}><span>${selectionStatus === "all" ? "✓" : selectionStatus === "some" ? "−" : ""}</span><b>${selectAction} all</b></button></div><div class="admin-children ${collapsed ? "is-collapsed" : ""}">${node.folders.map((child) => branch(child, depth + 1)).join("")}${node.files.map((file) => fileRow(file, depth + 1)).join("")}</div></section>`;
+    const visibilityStatus = folderVisibilityStatus(state.adminFiles, node.path); const visibleCount = descendantPaths.filter((path) => visiblePaths.has(path)).length; const nestedFolders = foldersInFolder(state.folderPaths, node.path).filter((path) => path !== node.path); const expandTree = collapsed || nestedFolders.some((path) => state.adminCollapsed.has(path)); const treeAction = expandTree ? "Expand" : "Collapse";
+    const treeControl = nestedFolders.length ? `<button class="admin-folder-branch" data-admin-folder-branch="${esc(node.path)}" aria-label="${treeAction} ${esc(node.path)} and all nested folders" title="${treeAction} this folder tree"><span>${expandTree ? "+" : "−"}</span></button>` : "";
+    return `<section class="admin-folder-node">${treeControl}<div class="admin-folder-row visibility-${visibilityStatus}" style="--depth:${depth}"><button class="admin-folder-toggle" data-admin-folder="${esc(node.path)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} ${esc(node.path)}"><span class="admin-folder-chevron">${hasChildren ? (collapsed ? "▶" : "▼") : "·"}</span></button><button class="admin-folder-main" data-admin-folder-select-row="${esc(node.path)}" aria-pressed="${selectionStatus === "some" ? "mixed" : selectionStatus === "all"}" aria-label="${selectAction} all ${descendantPaths.length} files in ${esc(node.path)}"><span class="admin-folder-icon">▱</span><strong>${esc(node.name)}</strong><small class="admin-folder-summary"><span></span>${visibleCount}/${descendantPaths.length} visible</small></button></div><div class="admin-children ${collapsed ? "is-collapsed" : ""}">${node.folders.map((child) => branch(child, depth + 1)).join("")}${node.files.map((file) => fileRow(file, depth + 1)).join("")}</div></section>`;
   };
   const visible = state.adminFiles.filter((file) => file.visible).length;
   const role = state.adminRoles.find((item) => item.id === state.adminRoleId);
   const roleOptions = state.adminRoles.filter((item) => !item.isAdmin).map((item) => `<option value="${item.id}" ${item.id === state.adminRoleId ? "selected" : ""}>${esc(item.name)}</option>`).join("");
   const tree = roots.map((node) => branch(node)).join("");
-  view.innerHTML = `<div class="document-header"><div class="eyebrow">Administration</div><h1>File visibility</h1><div class="document-meta">${visible} of ${state.adminFiles.length} files visible to ${esc(role.name)} · Users receive the combined access of all assigned roles</div></div><div class="visibility-role-picker"><label>Editing visibility for <select id="visibility-role">${roleOptions}</select></label></div><div class="admin-toolbar"><button class="button ghost" data-action="admin-expand-all">Expand all</button><button class="button ghost" data-action="admin-collapse-all">Collapse all</button><span id="admin-selection-count">${state.adminSelection.size} selected</span><button class="button ghost" data-action="admin-hide-selected">Hide selected</button><button class="button" data-action="admin-show-selected">Show selected</button></div><div class="admin-tree" role="listbox" aria-multiselectable="true">${tree || `<div class="empty-state">No article folders were found.</div>`}</div>`;
+  view.innerHTML = `<div class="document-header"><div class="eyebrow">Administration</div><h1>File visibility</h1><div class="document-meta">${visible} of ${state.adminFiles.length} files visible to ${esc(role.name)} · Users receive the combined access of all assigned roles</div></div><div class="visibility-role-picker"><label>Editing visibility for <select id="visibility-role">${roleOptions}</select></label></div><div class="admin-toolbar"><button class="button ghost" data-action="admin-expand-all">Expand all folders</button><button class="button ghost" data-action="admin-collapse-all">Collapse all folders</button><span id="admin-selection-count">${state.adminSelection.size} selected</span><button class="button ghost" data-action="admin-hide-selected">Hide selected</button><button class="button" data-action="admin-show-selected">Show selected</button></div><div class="admin-visibility-legend"><span><i class="legend-all"></i>All visible</span><span><i class="legend-some"></i>Some visible</span><span><i class="legend-none"></i>None visible</span><span><i class="legend-selected"></i>Selected for editing</span></div><div class="admin-tree" role="listbox" aria-multiselectable="true">${tree || `<div class="empty-state">No article folders were found.</div>`}</div>`;
 }
 async function updateAdminVisibility(paths, visible) {
   if (!paths.length) return toast("Select at least one file");
@@ -498,10 +504,10 @@ function openImage(src, title) {
 }
 async function route() {
   if (!state.user) return showAuth();
-  const hash = location.hash || "#home"; const [routeName, encoded] = hash.slice(1).split("/");
+  const { routeName, encoded, heading } = parseRouteHash(location.hash || "#home");
   if (!state.user.isAdmin && ["gm", "admin", "users", "new"].includes(routeName)) return navigate("#home");
   if (["home", "article", "folder", "file", "all", "pinned"].includes(routeName)) await loadFiles(true);
-  if (routeName === "article" || routeName === "folder") return openArticle(decodeURIComponent(encoded || ""));
+  if (routeName === "article" || routeName === "folder") { await openArticle(decodeURIComponent(encoded || "")); if (heading) requestAnimationFrame(() => document.getElementById(heading)?.scrollIntoView({ block: "start" })); return; }
   if (routeName === "file") { const file = state.files.find((item) => item.path === decodeURIComponent(encoded || "")); return file ? openArticle(file.folder) : renderNotFound(); }
   if (routeName === "all") return renderList("All articles", state.articles);
   if (routeName === "pinned") { const pins = pinned(); return renderList("Pinned articles", state.articles.filter((article) => pins.includes(article.path)), "A short shelf of references you want close at hand."); }
@@ -523,12 +529,16 @@ document.addEventListener("click", async (event) => {
     try { const data = await api(`/api/file?path=${encodeURIComponent(file.path)}`); state.currentFile = file; state.content = data.content; return renderEditor(file); }
     catch (error) { return toast(error.message); }
   }
+  const articleHeading = event.target.closest("[data-article-heading]");
+  if (articleHeading) { event.preventDefault(); history.replaceState(null, "", articleHeading.getAttribute("href")); document.getElementById(articleHeading.dataset.articleHeading)?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
   const articleNode = event.target.closest("[data-article]"); if (articleNode) { closeSearch(); return navigate(`#article/${encodeURIComponent(articleNode.dataset.article)}`); }
   const imageNode = event.target.closest("[data-image]"); if (imageNode) return openImage(imageNode.dataset.image, imageNode.dataset.imageTitle);
   const treeToggle = event.target.closest(".tree-toggle"); if (treeToggle) return treeToggle.closest(".tree-folder").classList.toggle("closed");
   if (event.target.closest(".visibility-toggle")) return;
-  const adminFolderSelection = event.target.closest("[data-admin-folder-selection]");
-  if (adminFolderSelection) return toggleAdminFolderSelection(adminFolderSelection.dataset.adminFolderSelection);
+  const adminFolderBranch = event.target.closest("[data-admin-folder-branch]");
+  if (adminFolderBranch) return toggleAdminFolderBranch(adminFolderBranch.dataset.adminFolderBranch);
+  const adminFolderSelection = event.target.closest("[data-admin-folder-select-row]");
+  if (adminFolderSelection) return toggleAdminFolderSelection(adminFolderSelection.dataset.adminFolderSelectRow);
   const adminFolder = event.target.closest("[data-admin-folder]");
   if (adminFolder) { const path = adminFolder.dataset.adminFolder; state.adminCollapsed.has(path) ? state.adminCollapsed.delete(path) : state.adminCollapsed.add(path); return renderAdminManager(); }
   const adminRow = event.target.closest("[data-admin-file-row]");

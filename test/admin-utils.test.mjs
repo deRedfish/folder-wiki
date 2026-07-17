@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filesInFolder, folderSelectionStatus } from "../public/admin-utils.mjs";
+import { filesInFolder, folderSelectionStatus, foldersInFolder, folderVisibilityStatus } from "../public/admin-utils.mjs";
 
 const files = [
   { path: "Campaigns/overview.md", folder: "Campaigns" },
@@ -25,4 +25,21 @@ test("folder selection reports empty, partial, and complete states", () => {
   assert.equal(folderSelectionStatus(files, "Campaigns", new Set()), "none");
   assert.equal(folderSelectionStatus(files, "Campaigns", new Set(["Campaigns/overview.md"])), "some");
   assert.equal(folderSelectionStatus(files, "Campaigns", new Set(filesInFolder(files, "Campaigns"))), "all");
+});
+
+test("folder trees include the selected folder and every nested folder", () => {
+  assert.deepEqual(foldersInFolder(["Campaigns", "Campaigns/Dwarovar", "Campaigns/Dwarovar/Notes", "Campaign Settings"], "Campaigns"), [
+    "Campaigns",
+    "Campaigns/Dwarovar",
+    "Campaigns/Dwarovar/Notes"
+  ]);
+});
+
+test("folder visibility summarizes every descendant file", () => {
+  const hidden = files.map((file) => ({ ...file, visible: false }));
+  const partial = hidden.map((file, index) => ({ ...file, visible: index === 0 }));
+  const visible = hidden.map((file) => ({ ...file, visible: file.folder.startsWith("Campaigns") }));
+  assert.equal(folderVisibilityStatus(hidden, "Campaigns"), "none");
+  assert.equal(folderVisibilityStatus(partial, "Campaigns"), "some");
+  assert.equal(folderVisibilityStatus(visible, "Campaigns"), "all");
 });
