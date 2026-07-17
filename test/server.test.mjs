@@ -27,4 +27,13 @@ test("a fresh wiki starts and exposes empty content APIs", async (context) => {
   assert.deepEqual(health, { ok: true });
   assert.deepEqual(files, []);
   assert.deepEqual(folders, []);
+
+  assert.equal((await fetch(`${base}/api/auth/logout`, withSession(cookie, { method: "POST" }))).status, 200);
+  assert.equal((await fetch(`${base}/api/auth/me`, withSession(cookie))).status, 401);
+  assert.equal((await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "firstadmin", password: "wrong password" }) })).status, 401);
+  const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "firstadmin", password: "a sufficiently secure password" }) });
+  assert.equal(login.status, 200); assert.match(login.headers.get("set-cookie"), /HttpOnly; SameSite=Strict/);
+  const renewedCookie = login.headers.get("set-cookie").split(";", 1)[0];
+  const me = await fetch(`${base}/api/auth/me`, withSession(renewedCookie)).then((response) => response.json());
+  assert.equal(me.username, "firstadmin"); assert.equal(me.isAdmin, true); assert.ok(me.lastLogin);
 });
