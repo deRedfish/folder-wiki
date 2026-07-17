@@ -97,6 +97,8 @@ Unsupported files are ignored rather than exposed by the server.
 
 The built-in renderer supports headings, paragraphs, emphasis, links, images, blockquotes, ordered and unordered lists, fenced code blocks, horizontal rules, and tables. `##`, `###`, and `####` headings populate the article's table of contents.
 
+Article images appear as a prominent visual-reference gallery before long-form text, with the first image shown uncropped as the featured reference and every image available in the full-size lightbox. Child articles and Markdown headings have separate navigation groups in a sticky side rail. On narrow screens, the navigation moves above the article instead of disappearing.
+
 Every `.md` or `.markdown` source has an **Edit source** button in its article, including articles that contain several Markdown files. An article with exactly one editable source also shows the top-level **Edit page** shortcut. Saving writes directly to that Markdown file inside `content/`.
 
 The editor includes high-contrast, color-only Markdown syntax highlighting and a live rendered preview. The source pane does not imitate rendered bold, italic, underline, or strikethrough; colors distinguish the syntax while the adjacent preview shows the final typography. The source and preview panes scroll independently within the available browser height, so the formatting toolbar remains in reach while working through long files.
@@ -123,7 +125,9 @@ Role access is cumulative. A user assigned Player and Gnome sees every file gran
 
 Open **File visibility** as an administrator and choose the viewer role whose access you want to edit.
 
-The manager mirrors the real `content/` hierarchy as a collapsible file tree. Expand or collapse folders to navigate deeply nested articles, and use the thumbnail beside an image file as a quick visual reference. Each file has its own **Visible** checkbox. Every folder also has a tri-state **Select all** control: it selects or deselects every file in that folder and all of its subfolders, including descendants hidden inside collapsed branches.
+The manager mirrors the real `content/` hierarchy as a collapsible file tree. Role-visible files are strongly marked in green; hidden files stay neutral; and blue remains reserved for the temporary editing selection. Folder rows summarize all descendants in green, amber, or gray for all, some, or no visible files, so role coverage remains readable when the tree is collapsed. Image files retain thumbnail previews.
+
+Use **Expand all folders** or **Collapse all folders** for the complete tree. Each folder's **Expand tree** or **Collapse tree** control applies to that folder and every nested folder, while clicking the folder name still opens or closes only that one level. Every folder also has a tri-state **Select all** control: it selects or deselects every file in that folder and all of its subfolders, including descendants hidden inside collapsed branches.
 
 For bulk changes, click anywhere on a file row to select it. Use `Ctrl`-click (or `Cmd`-click on macOS) to add or remove individual rows, and `Shift`-click to select a range from the previous selection. `Ctrl+A`/`Cmd+A` selects all files currently revealed in expanded folders, and `Escape` clears the selection. **Show selected** and **Hide selected** apply the visibility change to the selected rows.
 
