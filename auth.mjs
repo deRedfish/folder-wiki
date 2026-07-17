@@ -47,6 +47,7 @@ export class AuthStore {
         id INTEGER PRIMARY KEY,
         name TEXT NOT NULL COLLATE NOCASE UNIQUE,
         is_admin INTEGER NOT NULL DEFAULT 0 CHECK (is_admin IN (0, 1)),
+        system_key TEXT,
         created_at TEXT NOT NULL
       ) STRICT;
       CREATE TABLE IF NOT EXISTS user_roles (
@@ -72,8 +73,12 @@ export class AuthStore {
       CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
       CREATE INDEX IF NOT EXISTS role_files_path ON role_files(path);
     `);
-    const insertRole = this.db.prepare("INSERT OR IGNORE INTO roles (name, is_admin, created_at) VALUES (?, ?, ?)");
-    insertRole.run("Player", 0, now()); insertRole.run("GM", 1, now());
+    const roleColumns = new Set(this.db.prepare("PRAGMA table_info(roles)").all().map((column) => column.name));
+    if (!roleColumns.has("system_key")) this.db.exec("ALTER TABLE roles ADD COLUMN system_key TEXT");
+    const insertRole = this.db.prepare("INSERT OR IGNORE INTO roles (name, is_admin, system_key, created_at) VALUES (?, ?, ?, ?)");
+    insertRole.run("Player", 0, "player", now()); insertRole.run("GM", 1, "gm", now());
+    this.db.prepare("UPDATE roles SET system_key = 'player' WHERE name = 'Player' COLLATE NOCASE AND system_key IS NULL").run();
+    this.db.prepare("UPDATE roles SET system_key = 'gm' WHERE name = 'GM' COLLATE NOCASE AND system_key IS NULL").run();
   }
 
   close() { this.db.close(); }
@@ -113,9 +118,15 @@ export class AuthStore {
   }
 
   async register(username, password) {
-    const first = Number(this.db.prepare("SELECT COUNT(*) AS count FROM users").get().count) === 0;
-    const role = this.db.prepare("SELECT id FROM roles WHERE name = ? COLLATE NOCASE").get(first ? "GM" : "Player");
-    return this.createUser({ username, password, roleIds: [role.id] });
+    const name = validateUsername(username); const credentials = await passwordRecord(password);
+    const userId = this.transaction(() => {
+      const first = Number(this.db.prepare("SELECT COUNT(*) AS count FROM users").get().count) === 0;
+      const role = this.db.prepare("SELECT id FROM roles WHERE system_key = ?").get(first ? "gm" : "player");
+      const result = this.db.prepare("INSERT INTO users (username, password_hash, password_salt, joined_at) VALUES (?, ?, ?, ?)").run(name, credentials.hash, credentials.salt, now());
+      this.db.prepare("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)").run(result.lastInsertRowid, role.id);
+      return Number(result.lastInsertRowid);
+    });
+    return this.user(userId);
   }
 
   async authenticate(username, password) {
@@ -142,11 +153,11 @@ export class AuthStore {
   deleteSession(token) { if (token) this.db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash(token)); }
 
   listRoles() {
-    return this.db.prepare(`SELECT r.id, r.name, r.is_admin AS isAdmin, r.created_at AS createdAt,
+    return this.db.prepare(`SELECT r.id, r.name, r.is_admin AS isAdmin, r.system_key AS systemKey, r.created_at AS createdAt,
       COUNT(DISTINCT ur.user_id) AS userCount, COUNT(DISTINCT rf.path) AS fileCount
       FROM roles r LEFT JOIN user_roles ur ON ur.role_id = r.id LEFT JOIN role_files rf ON rf.role_id = r.id
       GROUP BY r.id ORDER BY r.name COLLATE NOCASE`).all()
-      .map((role) => ({ ...role, isAdmin: Boolean(role.isAdmin) }));
+      .map((role) => ({ ...role, isAdmin: Boolean(role.isAdmin), isSystem: Boolean(role.systemKey) }));
   }
 
   listUsers() {
@@ -162,15 +173,28 @@ export class AuthStore {
   updateRole(roleId, { name, isAdmin }) {
     const id = Number(roleId); const current = this.db.prepare("SELECT * FROM roles WHERE id = ?").get(id); if (!current) throw new Error("Role not found");
     const value = String(name || "").trim(); if (!/^[\p{L}\p{N} ._-]{2,40}$/u.test(value)) throw new Error("Role names must be 2–40 readable characters");
-    if (current.is_admin && !isAdmin && Number(this.db.prepare("SELECT COUNT(*) AS count FROM roles WHERE is_admin = 1").get().count) <= 1) throw new Error("At least one admin role is required");
-    this.db.prepare("UPDATE roles SET name = ?, is_admin = ? WHERE id = ?").run(value, isAdmin ? 1 : 0, id);
+    if (current.system_key && Boolean(current.is_admin) !== Boolean(isAdmin)) throw new Error("Default role permission types cannot be changed");
+    this.transaction(() => {
+      this.db.prepare("UPDATE roles SET name = ?, is_admin = ? WHERE id = ?").run(value, isAdmin ? 1 : 0, id);
+      const roles = Number(this.db.prepare("SELECT COUNT(*) AS count FROM roles WHERE is_admin = 1").get().count);
+      const users = Number(this.db.prepare("SELECT COUNT(DISTINCT ur.user_id) AS count FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.is_admin = 1").get().count);
+      if (!roles || !users) throw new Error("At least one admin role and admin user are required");
+    });
     return this.listRoles().find((role) => role.id === id);
   }
 
   deleteRole(roleId) {
     const id = Number(roleId); const role = this.db.prepare("SELECT * FROM roles WHERE id = ?").get(id); if (!role) throw new Error("Role not found");
-    if (role.is_admin && Number(this.db.prepare("SELECT COUNT(*) AS count FROM roles WHERE is_admin = 1").get().count) <= 1) throw new Error("At least one admin role is required");
-    this.db.prepare("DELETE FROM roles WHERE id = ?").run(id);
+    if (role.system_key) throw new Error("Default Player and GM roles cannot be deleted");
+    const soleAssignments = Number(this.db.prepare(`SELECT COUNT(*) AS count FROM user_roles ur WHERE ur.role_id = ?
+      AND (SELECT COUNT(*) FROM user_roles all_roles WHERE all_roles.user_id = ur.user_id) = 1`).get(id).count);
+    if (soleAssignments) throw new Error("Reassign users before deleting their only role");
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM roles WHERE id = ?").run(id);
+      const roles = Number(this.db.prepare("SELECT COUNT(*) AS count FROM roles WHERE is_admin = 1").get().count);
+      const users = Number(this.db.prepare("SELECT COUNT(DISTINCT ur.user_id) AS count FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.is_admin = 1").get().count);
+      if (!roles || !users) throw new Error("At least one admin role and admin user are required");
+    });
   }
 
   async updateUser(userId, { username, password, roleIds }) {
@@ -195,7 +219,7 @@ export class AuthStore {
 
   syncFiles(paths, legacyHidden = new Set()) {
     const wanted = new Set(paths); const known = new Set(this.db.prepare("SELECT path FROM files").all().map((file) => file.path));
-    const player = this.db.prepare("SELECT id FROM roles WHERE name = 'Player' COLLATE NOCASE").get();
+    const player = this.db.prepare("SELECT id FROM roles WHERE system_key = 'player'").get();
     this.transaction(() => {
       const addFile = this.db.prepare("INSERT INTO files (path, discovered_at) VALUES (?, ?)"); const grant = this.db.prepare("INSERT OR IGNORE INTO role_files (role_id, path) VALUES (?, ?)");
       for (const path of wanted) if (!known.has(path)) { addFile.run(path, now()); if (!legacyHidden.has(path)) grant.run(player.id, path); }
