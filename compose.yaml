@@ -1,0 +1,9 @@
+services:
+  wiki:
+    build: .
+    ports:
+      - "4173:4173"
+    volumes:
+      - ./content:/app/content
+      - ./.folder-wiki:/app/data
+    restart: unless-stopped

@@ -46,6 +46,16 @@ Open <http://127.0.0.1:4173>.
 
 The first account created from the signup screen receives the default **GM** administrator role. Later signups receive the default **Player** viewer role.
 
+### Run the full application with Docker
+
+Docker preserves accounts, editing, search, and role-based visibility while making the application portable to any host that accepts containers:
+
+```powershell
+docker compose up --build
+```
+
+Open <http://127.0.0.1:4173>. Compose bind-mounts `content/` for wiki files and `.folder-wiki/` for the SQLite database. Back up both directories and configure equivalent persistent volumes on a container host. The image listens on port `4173`, exposes `/api/health`, and includes Poppler's `pdftotext` for PDF search indexing.
+
 ## Feed the wiki
 
 All user material belongs under `content/`. The directory and everything inside it are Git-ignored; the server creates it automatically when needed.

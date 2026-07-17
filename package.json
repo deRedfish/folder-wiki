@@ -10,6 +10,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
+    "docker:up": "docker compose up --build",
     "test": "node --check server.mjs && node --check public/app.js && node --test"
   },
   "homepage": "https://github.com/deRedfish/folder-wiki#readme",
