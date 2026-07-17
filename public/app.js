@@ -1,5 +1,5 @@
 import { prettifyMarkdown } from "./editor-utils.mjs";
-import { filesInFolder, folderSelectionStatus } from "./admin-utils.mjs";
+import { filesInFolder, folderSelectionStatus, foldersInFolder, folderVisibilityStatus } from "./admin-utils.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -386,6 +386,11 @@ function toggleAdminFolderSelection(folder) {
   paths.forEach((path) => allSelected ? state.adminSelection.delete(path) : state.adminSelection.add(path));
   state.adminAnchor = null; syncAdminSelection();
 }
+function toggleAdminFolderBranch(folder) {
+  const paths = foldersInFolder(state.folderPaths, folder); const shouldExpand = paths.some((path) => state.adminCollapsed.has(path));
+  paths.forEach((path) => shouldExpand ? state.adminCollapsed.delete(path) : state.adminCollapsed.add(path));
+  renderAdminManager();
+}
 function selectAdminRow(path, event) {
   const order = adminFileRows(); const additive = event.ctrlKey || event.metaKey;
   if (event.shiftKey && state.adminAnchor && order.includes(state.adminAnchor)) {
@@ -415,20 +420,22 @@ function renderAdminManager() {
   const sortByName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
   for (const node of nodes.values()) { node.folders.sort(sortByName); node.files.sort(sortByName); }
   roots.sort(sortByName);
+  const visiblePaths = new Set(state.adminFiles.filter((file) => file.visible).map((file) => file.path));
   const fileRow = (file, depth) => {
     const selected = state.adminSelection.has(file.path);
     const preview = file.type === "image" ? `<img class="admin-preview" loading="lazy" src="${esc(adminPreviewUrl(file))}" alt="">` : `<span class="admin-file-icon">${icons[file.type] || "·"}</span>`;
-    return `<div class="admin-file ${file.visible ? "" : "is-hidden"} ${selected ? "is-selected" : ""}" data-admin-file-row="${esc(file.path)}" style="--depth:${depth}" tabindex="0" role="option" aria-selected="${selected}">${preview}<span class="admin-file-name"><strong>${esc(file.name)}</strong><small>${esc(file.path)}</small></span><label class="visibility-toggle"><input type="checkbox" data-admin-visible="${esc(file.path)}" ${file.visible ? "checked" : ""}><span>Visible</span></label></div>`;
+    return `<div class="admin-file ${file.visible ? "is-visible" : "is-hidden"} ${selected ? "is-selected" : ""}" data-admin-file-row="${esc(file.path)}" style="--depth:${depth}" tabindex="0" role="option" aria-selected="${selected}">${preview}<span class="admin-file-name"><strong>${esc(file.name)}</strong><small>${esc(file.path)}</small></span><label class="visibility-toggle"><input type="checkbox" data-admin-visible="${esc(file.path)}" ${file.visible ? "checked" : ""}><span>Visible</span></label></div>`;
   };
   const branch = (node, depth = 0) => {
     const collapsed = state.adminCollapsed.has(node.path); const hasChildren = node.folders.length || node.files.length; const descendantPaths = filesInFolder(state.adminFiles, node.path); const selectionStatus = folderSelectionStatus(state.adminFiles, node.path, state.adminSelection); const selectAction = selectionStatus === "all" ? "Deselect" : "Select";
-    return `<section class="admin-folder-node"><div class="admin-folder-row" style="--depth:${depth}"><button class="admin-folder-main" data-admin-folder="${esc(node.path)}" aria-expanded="${!collapsed}"><span class="admin-folder-chevron">${hasChildren ? (collapsed ? "▶" : "▼") : "·"}</span><span class="admin-folder-icon">▱</span><strong>${esc(node.name)}</strong><small>${descendantPaths.length} file${descendantPaths.length === 1 ? "" : "s"}</small></button><button class="admin-folder-select ${selectionStatus === "all" ? "is-all" : selectionStatus === "some" ? "is-partial" : ""}" data-admin-folder-selection="${esc(node.path)}" aria-pressed="${selectionStatus === "some" ? "mixed" : selectionStatus === "all"}" aria-label="${selectAction} all ${descendantPaths.length} files in ${esc(node.path)}" title="${selectAction} this folder and all subfolders" ${descendantPaths.length ? "" : "disabled"}><span>${selectionStatus === "all" ? "✓" : selectionStatus === "some" ? "−" : ""}</span><b>${selectAction} all</b></button></div><div class="admin-children ${collapsed ? "is-collapsed" : ""}">${node.folders.map((child) => branch(child, depth + 1)).join("")}${node.files.map((file) => fileRow(file, depth + 1)).join("")}</div></section>`;
+    const visibilityStatus = folderVisibilityStatus(state.adminFiles, node.path); const visibleCount = descendantPaths.filter((path) => visiblePaths.has(path)).length; const nestedFolders = foldersInFolder(state.folderPaths, node.path).filter((path) => path !== node.path); const expandTree = collapsed || nestedFolders.some((path) => state.adminCollapsed.has(path)); const treeAction = expandTree ? "Expand" : "Collapse";
+    return `<section class="admin-folder-node"><div class="admin-folder-row visibility-${visibilityStatus}" style="--depth:${depth}"><button class="admin-folder-main" data-admin-folder="${esc(node.path)}" aria-expanded="${!collapsed}"><span class="admin-folder-chevron">${hasChildren ? (collapsed ? "▶" : "▼") : "·"}</span><span class="admin-folder-icon">▱</span><strong>${esc(node.name)}</strong><small class="admin-folder-summary"><span></span>${visibleCount}/${descendantPaths.length} visible</small></button><button class="admin-folder-branch" data-admin-folder-branch="${esc(node.path)}" aria-label="${treeAction} ${esc(node.path)} and all nested folders" title="${treeAction} this folder tree" ${nestedFolders.length ? "" : "disabled"}><span>${expandTree ? "+" : "−"}</span><b>${treeAction} tree</b></button><button class="admin-folder-select ${selectionStatus === "all" ? "is-all" : selectionStatus === "some" ? "is-partial" : ""}" data-admin-folder-selection="${esc(node.path)}" aria-pressed="${selectionStatus === "some" ? "mixed" : selectionStatus === "all"}" aria-label="${selectAction} all ${descendantPaths.length} files in ${esc(node.path)}" title="${selectAction} this folder and all subfolders" ${descendantPaths.length ? "" : "disabled"}><span>${selectionStatus === "all" ? "✓" : selectionStatus === "some" ? "−" : ""}</span><b>${selectAction} all</b></button></div><div class="admin-children ${collapsed ? "is-collapsed" : ""}">${node.folders.map((child) => branch(child, depth + 1)).join("")}${node.files.map((file) => fileRow(file, depth + 1)).join("")}</div></section>`;
   };
   const visible = state.adminFiles.filter((file) => file.visible).length;
   const role = state.adminRoles.find((item) => item.id === state.adminRoleId);
   const roleOptions = state.adminRoles.filter((item) => !item.isAdmin).map((item) => `<option value="${item.id}" ${item.id === state.adminRoleId ? "selected" : ""}>${esc(item.name)}</option>`).join("");
   const tree = roots.map((node) => branch(node)).join("");
-  view.innerHTML = `<div class="document-header"><div class="eyebrow">Administration</div><h1>File visibility</h1><div class="document-meta">${visible} of ${state.adminFiles.length} files visible to ${esc(role.name)} · Users receive the combined access of all assigned roles</div></div><div class="visibility-role-picker"><label>Editing visibility for <select id="visibility-role">${roleOptions}</select></label></div><div class="admin-toolbar"><button class="button ghost" data-action="admin-expand-all">Expand all</button><button class="button ghost" data-action="admin-collapse-all">Collapse all</button><span id="admin-selection-count">${state.adminSelection.size} selected</span><button class="button ghost" data-action="admin-hide-selected">Hide selected</button><button class="button" data-action="admin-show-selected">Show selected</button></div><div class="admin-tree" role="listbox" aria-multiselectable="true">${tree || `<div class="empty-state">No article folders were found.</div>`}</div>`;
+  view.innerHTML = `<div class="document-header"><div class="eyebrow">Administration</div><h1>File visibility</h1><div class="document-meta">${visible} of ${state.adminFiles.length} files visible to ${esc(role.name)} · Users receive the combined access of all assigned roles</div></div><div class="visibility-role-picker"><label>Editing visibility for <select id="visibility-role">${roleOptions}</select></label></div><div class="admin-toolbar"><button class="button ghost" data-action="admin-expand-all">Expand all folders</button><button class="button ghost" data-action="admin-collapse-all">Collapse all folders</button><span id="admin-selection-count">${state.adminSelection.size} selected</span><button class="button ghost" data-action="admin-hide-selected">Hide selected</button><button class="button" data-action="admin-show-selected">Show selected</button></div><div class="admin-tree" role="listbox" aria-multiselectable="true">${tree || `<div class="empty-state">No article folders were found.</div>`}</div>`;
 }
 async function updateAdminVisibility(paths, visible) {
   if (!paths.length) return toast("Select at least one file");
@@ -530,6 +537,8 @@ document.addEventListener("click", async (event) => {
   const imageNode = event.target.closest("[data-image]"); if (imageNode) return openImage(imageNode.dataset.image, imageNode.dataset.imageTitle);
   const treeToggle = event.target.closest(".tree-toggle"); if (treeToggle) return treeToggle.closest(".tree-folder").classList.toggle("closed");
   if (event.target.closest(".visibility-toggle")) return;
+  const adminFolderBranch = event.target.closest("[data-admin-folder-branch]");
+  if (adminFolderBranch) return toggleAdminFolderBranch(adminFolderBranch.dataset.adminFolderBranch);
   const adminFolderSelection = event.target.closest("[data-admin-folder-selection]");
   if (adminFolderSelection) return toggleAdminFolderSelection(adminFolderSelection.dataset.adminFolderSelection);
   const adminFolder = event.target.closest("[data-admin-folder]");
