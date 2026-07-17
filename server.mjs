@@ -232,7 +232,9 @@ const server = http.createServer(async (req, res) => {
     if (userRoute && req.method === "DELETE") { requireAdmin(user); if (Number(userRoute[1]) === user.id) throw new Error("You cannot delete your own account"); auth.deleteUser(userRoute[1]); return json(res, { ok: true }); }
     if (url.pathname === "/api/files" && req.method === "GET") {
       const index = await buildIndex(url.searchParams.has("refresh")); const files = visibleRecords(index, user);
-      return json(res, user.isAdmin ? files.map((file) => ({ ...file, viewerVisible: auth.isVisibleToAnyViewer(file.path) })) : files);
+      if (!user.isAdmin) return json(res, files);
+      const viewerRoles = auth.viewerRolesByPath();
+      return json(res, files.map((file) => ({ ...file, viewerRoles: viewerRoles.get(file.path) || [], viewerVisible: viewerRoles.has(file.path) })));
     }
     if (url.pathname === "/api/folders" && req.method === "GET") { const index = await buildIndex(url.searchParams.has("refresh")); return json(res, visibleFolders(index, user)); }
     if (url.pathname === "/api/search" && req.method === "GET") {

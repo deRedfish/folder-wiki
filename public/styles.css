@@ -96,8 +96,9 @@ h1,h2,h3,h4 { font-family:"Libre Caslon Text",Georgia,serif; }
 .source-toolbar .source-label { margin-bottom:0; }
 .source-edit { border:1px solid var(--line); border-radius:5px; background:#fffdf8; color:var(--gold-dark); padding:5px 9px; cursor:pointer; font:600 11px Inter,"Segoe UI",sans-serif; }
 .source-edit:hover { border-color:#b49a71; }
-.restriction-warning { display:flex; align-items:center; gap:10px; margin:-4px 0 24px; padding:11px 14px; border:1px solid #d69a77; border-radius:6px; background:#fff0e5; color:#7d3826; }
-.restriction-warning strong { font-size:11px; text-transform:uppercase; letter-spacing:.08em; }.restriction-warning span { color:#7d5145; }
+.article-access-notice { display:flex; align-items:center; gap:10px; margin:-4px 0 24px; padding:11px 14px; border:1px solid #d3aa38; border-radius:6px; background:#fff2bd; color:#604a13; font-size:12px; }
+.article-access-notice > span { font-weight:600; }.article-access-notice > div { display:flex; flex-wrap:wrap; gap:5px; }
+.article-access-notice b { padding:3px 7px; border:1px solid #d7b75d; border-radius:999px; background:#fff8dc; color:#5a4310; font-size:10px; }
 .prose { font-family:"Libre Caslon Text",Georgia,serif; line-height:1.82; font-size:16px; }
 .prose h1,.prose h2,.prose h3,.prose h4 { scroll-margin-top:90px; line-height:1.25; }
 .prose h2 { margin:2.2em 0 .65em; font-size:28px; padding-bottom:8px; border-bottom:1px solid var(--line); }

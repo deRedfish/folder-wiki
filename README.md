@@ -121,7 +121,7 @@ The default roles are **GM** and **Player**. GM is an administrator role and Pla
 
 Administrators can open **User management** to see usernames, join dates, last-login dates, and assigned roles. They can create, edit, and delete accounts; reset passwords; combine several roles on one account; and add, rename, change, or remove custom roles. Safeguards prevent removing the final administrator or deleting a role while it is someone's only role.
 
-Role access is cumulative. A user assigned Player and Gnome sees every file granted to either Player or Gnome. Administrator roles bypass file visibility entirely and show a warning on articles containing sources hidden from every viewer role.
+Role access is cumulative. A user assigned Player and Gnome sees every file granted to either Player or Gnome. Administrator roles bypass file visibility entirely. Every article shows administrators a yellow access notice listing the viewer roles that can reach it, or stating that no viewer role has access.
 
 Open **File visibility** as an administrator and choose the viewer role whose access you want to edit.
 

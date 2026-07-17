@@ -235,14 +235,21 @@ export class AuthStore {
 
   rolePaths(roleId) { return new Set(this.db.prepare("SELECT path FROM role_files WHERE role_id = ?").all(Number(roleId)).map((file) => file.path)); }
 
+  viewerRolesByPath() {
+    const access = new Map();
+    const rows = this.db.prepare(`SELECT rf.path, r.id, r.name FROM role_files rf JOIN roles r ON r.id = rf.role_id
+      WHERE r.is_admin = 0 ORDER BY r.name COLLATE NOCASE`).all();
+    for (const row of rows) {
+      if (!access.has(row.path)) access.set(row.path, []);
+      access.get(row.path).push({ id: row.id, name: row.name });
+    }
+    return access;
+  }
+
   setRolePaths(roleId, paths, visible) {
     const id = Number(roleId); const role = this.db.prepare("SELECT id FROM roles WHERE id = ?").get(id); if (!role) throw new Error("Role not found");
     const available = new Set(this.db.prepare("SELECT path FROM files").all().map((file) => file.path)); if (paths.some((path) => !available.has(path))) throw new Error("One or more files no longer exist");
     this.transaction(() => { const statement = this.db.prepare(visible ? "INSERT OR IGNORE INTO role_files (role_id, path) VALUES (?, ?)" : "DELETE FROM role_files WHERE role_id = ? AND path = ?"); paths.forEach((path) => statement.run(id, path)); });
   }
 
-  isVisibleToAnyViewer(path) {
-    return Boolean(this.db.prepare(`SELECT 1 FROM role_files rf JOIN roles r ON r.id = rf.role_id
-      WHERE rf.path = ? AND r.is_admin = 0 LIMIT 1`).get(path));
-  }
 }
