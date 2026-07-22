@@ -7,7 +7,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci --omit=dev
-COPY --chown=node:node auth.mjs server.mjs README.md LICENSE ./
+COPY --chown=node:node auth.mjs map-store.mjs server.mjs README.md LICENSE ./
 COPY --chown=node:node public ./public
 RUN mkdir -p /app/content /app/data && chown -R node:node /app/content /app/data
 

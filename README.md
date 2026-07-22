@@ -20,6 +20,7 @@ Folder Wiki works especially well as a personal encyclopedia, research archive, 
 - Account signup, secure sessions, cumulative roles, and per-role content access
 - Recently updated, pinned, filtered, and random article navigation
 - Local GM screen with initiative tracker, dice roller, and scratchpad
+- Persistent world maps with adjustable image-backed hex grids, fog of war, discoveries, notes, and movable tokens
 - Responsive layout for desktop and mobile browsers
 - Built-in SQLite persistence with no external database service or runtime package dependencies
 
@@ -165,8 +166,24 @@ Files not granted to any of a viewer's roles are removed from article pages, fol
 
 Users, roles, sessions, and role visibility grants are stored in `.folder-wiki/wiki.db`. The runtime directory is Git-ignored and should not be committed. Existing `.folder-wiki/visibility.json` choices are respected when files are first migrated into the role database.
 
-## Local browser data
+## World map editor
 
+Every logged-in user can open **World map**. Players see only the map currently made active by an administrator. Administrators can create any number of maps, switch between them, and choose which single map is active for players.
+
+Open **Map and grid settings** to choose any image already stored in the wiki or upload a new image to a chosen folder under `content/`. Map width, map height, grid columns, grid rows, hex size, and horizontal or vertical grid offsets are independently adjustable. Reducing the row or column count warns before removing anything outside the new bounds.
+
+Select a hex to open its inspector. Administrators can:
+
+- cover or reveal individual hexes, or set the fog state of the complete grid;
+- assign fantasy feature icons, labels, and colors;
+- add labelled, colored tokens and drag them between hexes;
+- edit or remove any shared note.
+
+All users can add notes to revealed hexes and edit or remove their own notes. Hexes with visible notes receive a distinct outline. Fogged hexes remain inspectable to administrators with a darkened treatment, but player API responses remove their feature data, notes, and tokens before the data reaches the browser. Players see a uniform cloudy hex instead.
+
+Map configuration, hex state, notes, tokens, and the active-map choice are stored in `.folder-wiki/wiki.db`. Uploaded backgrounds remain ordinary files in `content/`, so back up both locations.
+
+## Local browser data
 
 Pinned articles, initiative entries, and GM scratch notes are stored in your browser's local storage. Login sessions are stored in the local SQLite database and represented in the browser by an HttpOnly cookie. None of these values are written into `content/` or synchronized between browsers.
 

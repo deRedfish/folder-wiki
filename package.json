@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node server.mjs",
     "docker:up": "docker compose up --build",
-    "test": "node --check server.mjs && node --check public/app.js && node --test"
+    "test": "node --check server.mjs && node --check map-store.mjs && node --check public/app.js && node --check public/map-view.mjs && node --test"
   },
   "homepage": "https://github.com/deRedfish/folder-wiki#readme",
   "repository": {
