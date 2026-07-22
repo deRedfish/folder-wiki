@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AuthStore } from "./auth.mjs";
+import { MapStore } from "./map-store.mjs";
 
 const execFileAsync = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,7 @@ const MIME = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=u
 
 let cache = { at: 0, files: [], folders: [], search: [] };
 let auth;
+let maps;
 const textCache = new Map();
 const pdfPending = new Set();
 
@@ -162,10 +164,14 @@ function json(res, value, status = 200, headers = {}) {
   res.end(body);
 }
 function sendError(res, error, status = 400) { json(res, { error: error.message || String(error) }, status); }
-async function bodyJson(req) {
-  let body = "";
-  for await (const chunk of req) { body += chunk; if (body.length > 5_000_000) throw new Error("Document is too large"); }
-  return JSON.parse(body || "{}");
+async function bodyJson(req, maxBytes = 5_000_000) {
+  const chunks = []; let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) throw new Error("Request is too large");
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 function excerpt(content, query) {
   const plain = content.replace(/[#*_>`|\[\]()]/g, " ").replace(/\s+/g, " ").trim();
@@ -180,6 +186,40 @@ async function serveFile(res, file, download = false) {
   const headers = { "content-type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream", "content-length": info.size, "cache-control": "no-cache" };
   if (download) headers["content-disposition"] = `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(file))}`;
   res.writeHead(200, headers); createReadStream(file).pipe(res);
+}
+
+function requireMapAccess(user, mapId) {
+  const map = maps.getMap(mapId, user.isAdmin);
+  if (!map) throw authError("Map not found", 404);
+  return map;
+}
+
+async function validatedMapImage(value) {
+  if (value === null || value === "") return null;
+  const file = safeContentPath(value);
+  if (!IMAGE_TYPES.has(path.extname(file).toLowerCase())) throw new Error("Choose a supported wiki image");
+  const info = await stat(file);
+  if (!info.isFile()) throw new Error("Map image not found");
+  return relative(file);
+}
+
+async function uploadMapImage(input) {
+  const folder = String(input.folder || "Maps").trim().replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  const suppliedName = String(input.name || "").trim().replaceAll("\\", "/");
+  const name = path.posix.basename(suppliedName);
+  if (!folder || folder === "." || !name || name !== suppliedName) throw new Error("Choose a content folder and a file name");
+  if (!IMAGE_TYPES.has(path.extname(name).toLowerCase())) throw new Error("Upload a PNG, JPG, WEBP, GIF, AVIF, or SVG image");
+  const encoded = String(input.data || "").replace(/^data:[^;]+;base64,/, "").replace(/\s+/g, "");
+  if (!encoded || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new Error("Image data is invalid");
+  const data = Buffer.from(encoded, "base64");
+  if (!data.length || data.length > 50 * 1024 * 1024) throw new Error("Images must be 50 MB or smaller");
+  const file = safeContentPath(path.posix.join(folder, name));
+  await mkdir(path.dirname(file), { recursive: true });
+  try { await writeFile(file, data, { flag: "wx" }); }
+  catch (error) { if (error.code === "EEXIST") throw new Error("An image with that name already exists in this folder"); throw error; }
+  cache.at = 0;
+  await buildIndex(true);
+  return { path: relative(file), name };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -201,6 +241,58 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/auth/me" && req.method === "GET") return json(res, requireUser(req));
 
     const user = url.pathname.startsWith("/api/") || url.pathname.startsWith("/content/") ? requireUser(req) : null;
+    if (url.pathname === "/api/maps" && req.method === "GET") return json(res, maps.listMaps(user.isAdmin));
+    if (url.pathname === "/api/maps" && req.method === "POST") { requireAdmin(user); return json(res, maps.createMap(await bodyJson(req), user.id), 201); }
+    if (url.pathname === "/api/maps/images" && req.method === "GET") {
+      requireAdmin(user); const index = await buildIndex(true);
+      return json(res, index.files.filter((file) => file.type === "image"));
+    }
+    if (url.pathname === "/api/maps/images" && req.method === "POST") {
+      requireAdmin(user); return json(res, await uploadMapImage(await bodyJson(req, 70 * 1024 * 1024)), 201);
+    }
+    const mapImageRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/image$/);
+    if (mapImageRoute && req.method === "GET") {
+      const map = requireMapAccess(user, mapImageRoute[1]);
+      if (!map.imagePath) throw authError("Map image not found", 404);
+      return serveFile(res, safeContentPath(map.imagePath));
+    }
+    const mapActivateRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/activate$/);
+    if (mapActivateRoute && req.method === "POST") { requireAdmin(user); return json(res, maps.activateMap(mapActivateRoute[1])); }
+    const mapHexRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/hex$/);
+    if (mapHexRoute && req.method === "PUT") {
+      requireAdmin(user); maps.setHex(mapHexRoute[1], await bodyJson(req)); return json(res, { ok: true });
+    }
+    const mapNotesRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/notes$/);
+    if (mapNotesRoute && req.method === "POST") {
+      requireMapAccess(user, mapNotesRoute[1]); return json(res, maps.addNote(mapNotesRoute[1], await bodyJson(req), user.id), 201);
+    }
+    const mapNoteRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/notes\/(\d+)$/);
+    if (mapNoteRoute && req.method === "PUT") {
+      requireMapAccess(user, mapNoteRoute[1]); const input = await bodyJson(req);
+      maps.updateNote(mapNoteRoute[1], mapNoteRoute[2], input.body, user.id, user.isAdmin); return json(res, { ok: true });
+    }
+    if (mapNoteRoute && req.method === "DELETE") {
+      requireMapAccess(user, mapNoteRoute[1]); maps.deleteNote(mapNoteRoute[1], mapNoteRoute[2], user.id, user.isAdmin); return json(res, { ok: true });
+    }
+    const mapTokensRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/tokens$/);
+    if (mapTokensRoute && req.method === "POST") {
+      requireAdmin(user); return json(res, maps.createToken(mapTokensRoute[1], await bodyJson(req), user.id), 201);
+    }
+    const mapTokenRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/tokens\/(\d+)$/);
+    if (mapTokenRoute && req.method === "PUT") {
+      requireAdmin(user); maps.updateToken(mapTokenRoute[1], mapTokenRoute[2], await bodyJson(req)); return json(res, { ok: true });
+    }
+    if (mapTokenRoute && req.method === "DELETE") {
+      requireAdmin(user); maps.deleteToken(mapTokenRoute[1], mapTokenRoute[2]); return json(res, { ok: true });
+    }
+    const mapRoute = url.pathname.match(/^\/api\/maps\/(\d+)$/);
+    if (mapRoute && req.method === "GET") return json(res, requireMapAccess(user, mapRoute[1]));
+    if (mapRoute && req.method === "PUT") {
+      requireAdmin(user); const input = await bodyJson(req);
+      if (Object.hasOwn(input, "imagePath")) input.imagePath = await validatedMapImage(input.imagePath);
+      return json(res, maps.updateMap(mapRoute[1], input));
+    }
+    if (mapRoute && req.method === "DELETE") { requireAdmin(user); maps.deleteMap(mapRoute[1]); return json(res, { ok: true }); }
     if (url.pathname === "/api/admin/files" && req.method === "GET") {
       requireAdmin(user); const roleId = Number(url.searchParams.get("roleId")); if (!roleId) throw new Error("Choose a role");
       const role = auth.listRoles().find((item) => item.id === roleId); if (!role) throw new Error("Role not found");
@@ -283,6 +375,7 @@ const server = http.createServer(async (req, res) => {
 export async function startServer() {
   await Promise.all([mkdir(CONTENT_ROOT, { recursive: true }), mkdir(RUNTIME_ROOT, { recursive: true })]);
   auth = new AuthStore(DATABASE_FILE);
+  maps = new MapStore(DATABASE_FILE);
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(PORT, HOST, () => {
@@ -302,6 +395,7 @@ if (isMain) {
     stopping = true;
     console.log(`${signal} received; closing Folder Wiki`);
     server.close(() => {
+      maps?.close();
       auth?.close();
       process.exit(0);
     });
