@@ -2,8 +2,8 @@ services:
   wiki:
     build: .
     ports:
-      - "4173:4173"
+      - "${FOLDER_WIKI_PORT:-4173}:4173"
     volumes:
-      - ./content:/app/content
-      - ./.folder-wiki:/app/data
+      - "${FOLDER_WIKI_CONTENT:-./content}:/app/content"
+      - "${FOLDER_WIKI_DATA:-./.folder-wiki}:/app/data"
     restart: unless-stopped

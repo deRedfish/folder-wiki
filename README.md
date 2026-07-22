@@ -33,6 +33,15 @@ The wiki itself works without `pdftotext`; PDFs simply will not contribute text 
 
 ## Install and start
 
+Folder Wiki has two supported full-application deployment paths. Both retain accounts, role visibility, editing, search, and the SQLite database.
+
+| Method | Best for | Persistent data |
+| --- | --- | --- |
+| Node.js with npm | A machine where you already manage Node processes | `content/` and `.folder-wiki/` |
+| Docker Compose | Portable installs and container hosts | The configured content and data mounts |
+
+### Run directly with Node.js
+
 From PowerShell:
 
 ```powershell
@@ -46,15 +55,26 @@ Open <http://127.0.0.1:4173>.
 
 The first account created from the signup screen receives the default **GM** administrator role. Later signups receive the default **Player** viewer role.
 
-### Run the full application with Docker
+For a persistent server, use `npm ci --omit=dev`, set `HOST=0.0.0.0`, and keep the Node process running with your operating system's service manager. `CONTENT_ROOT` and `RUNTIME_ROOT` let you place wiki files and application data outside the cloned repository. See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete environment-variable and reverse-proxy guide.
 
-Docker preserves accounts, editing, search, and role-based visibility while making the application portable to any host that accepts containers:
+### Run with Docker
+
+Docker Desktop or Docker Engine with the Compose plugin is required:
 
 ```powershell
 docker compose up --build
 ```
 
 Open <http://127.0.0.1:4173>. Compose bind-mounts `content/` for wiki files and `.folder-wiki/` for the SQLite database. Back up both directories and configure equivalent persistent volumes on a container host. The image listens on port `4173`, exposes `/api/health`, and includes Poppler's `pdftotext` for PDF search indexing.
+
+Copy `.env.example` to `.env` to change the published port or the two persistent host directories without editing Compose:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build -d
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for updates, backups, health checks, and deployment behind HTTPS.
 
 ## Feed the wiki
 
@@ -152,6 +172,15 @@ Pinned articles, initiative entries, and GM scratch notes are stored in your bro
 
 ## Configuration
 
+Direct npm deployments support these environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HOST` | `127.0.0.1` | Network interface on which the Node server listens |
+| `PORT` | `4173` | HTTP port |
+| `CONTENT_ROOT` | `./content` | Folder containing all wiki articles and source files |
+| `RUNTIME_ROOT` | `./.folder-wiki` | Folder containing the SQLite database and runtime state |
+
 The defaults bind the server only to your computer:
 
 ```powershell
@@ -172,7 +201,7 @@ $env:HOST="0.0.0.0"
 npm start
 ```
 
-Only expose Folder Wiki on a trusted network. Accounts and role authorization protect campaign information from other wiki users, but the server is designed for local or trusted-network use rather than hardened public internet hosting.
+For internet deployment, keep Folder Wiki behind an HTTPS reverse proxy and do not expose its plain HTTP port publicly. Accounts and role authorization protect campaign information from other wiki users, but TLS, firewall policy, rate limiting, and host security belong at the deployment layer.
 
 ## Backups
 

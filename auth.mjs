@@ -252,4 +252,6 @@ export class AuthStore {
     this.transaction(() => { const statement = this.db.prepare(visible ? "INSERT OR IGNORE INTO role_files (role_id, path) VALUES (?, ?)" : "DELETE FROM role_files WHERE role_id = ? AND path = ?"); paths.forEach((path) => statement.run(id, path)); });
   }
 
+  close() { this.db.close(); }
+
 }
