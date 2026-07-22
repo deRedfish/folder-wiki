@@ -1,19 +1,22 @@
-import { cellKey, hexCenter, hexPoints, nearestHex } from "./map-utils.mjs";
+import { cellKey, gridDimensions, hexCenter, hexPoints, nearestHex } from "./map-utils.mjs";
 
 export const FEATURE_ICONS = [
-  ["🏰", "Fortress"], ["🏘", "Settlement"], ["⛺", "Camp"], ["⚔", "Danger"],
-  ["🐉", "Monster"], ["☠", "Death"], ["✦", "Magic"], ["⛩", "Shrine"],
-  ["⛏", "Mine"], ["🌲", "Forest"], ["⛰", "Mountain"], ["⚓", "Port"],
-  ["💰", "Treasure"], ["👁", "Mystery"], ["◆", "Landmark"]
+  ["🏰", "Fortress"], ["🏘", "Settlement"], ["⛺", "Camp"], ["⚔", "Danger"], ["🐉", "Monster"],
+  ["☠", "Death"], ["✦", "Magic"], ["⛩", "Shrine"], ["⛏", "Mine"], ["🌲", "Forest"],
+  ["⛰", "Mountain"], ["⚓", "Port"], ["💰", "Treasure"], ["👁", "Mystery"], ["◆", "Landmark"]
 ];
 const TOKEN_ICONS = [["●", "Party"], ["◆", "Enemy"], ["♞", "Riders"], ["⚑", "Army"], ["✦", "Special"]];
 const esc = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
-const option = (value, label, selected) => `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`;
+const option = (value, label, selected) => `<option value="${esc(value)}" ${String(value) === String(selected) ? "selected" : ""}>${esc(label)}</option>`;
+const clone = (value) => JSON.parse(JSON.stringify(value));
 
 export class WorldMapView {
   constructor({ root, api, toast, user }) {
     this.root = root; this.api = api; this.toast = toast; this.getUser = user;
-    this.maps = []; this.images = []; this.map = null; this.selected = null; this.zoom = 0.8; this.drag = null; this.suppressClickUntil = 0;
+    this.maps = []; this.images = []; this.templates = []; this.map = null; this.persistedMap = null; this.selected = null;
+    this.zoom = .8; this.drag = null; this.paintStroke = null; this.paintMode = "inspect"; this.suppressClickUntil = 0;
+    this.brush = { featureIcon: "🏰", featureLabel: "Fortress", featureColor: "#a56a36" };
+    this.selectedTemplateId = null; this.hexSaveTimer = null; this.stageFrame = null;
     root.addEventListener("click", (event) => this.click(event));
     root.addEventListener("submit", (event) => this.submit(event));
     root.addEventListener("change", (event) => this.change(event));
@@ -21,13 +24,14 @@ export class WorldMapView {
     root.addEventListener("pointerdown", (event) => this.pointerDown(event));
     window.addEventListener("pointermove", (event) => this.pointerMove(event));
     window.addEventListener("pointerup", (event) => this.pointerUp(event));
+    window.addEventListener("pointercancel", () => this.cancelPointer());
   }
 
   async mount() {
     this.root.innerHTML = '<div class="empty-state">Loading world maps…</div>';
     try {
       this.maps = await this.api("/api/maps");
-      this.images = this.getUser().isAdmin ? await this.api("/api/maps/images") : [];
+      if (this.getUser().isAdmin) [this.images, this.templates] = await Promise.all([this.api("/api/maps/images"), this.api("/api/maps/templates")]);
       const available = this.maps.find((map) => map.id === this.map?.id) || this.maps.find((map) => map.isActive) || this.maps[0];
       if (!available) { this.map = null; this.renderEmpty(); return; }
       await this.load(available.id);
@@ -35,7 +39,7 @@ export class WorldMapView {
   }
 
   async load(mapId) {
-    this.map = await this.api(`/api/maps/${mapId}`);
+    this.map = await this.api(`/api/maps/${mapId}`); this.persistedMap = clone(this.map);
     if (this.selected && (this.selected.col >= this.map.columns || this.selected.row >= this.map.rows)) this.selected = null;
     this.render();
   }
@@ -51,130 +55,137 @@ export class WorldMapView {
   hexState() { return new Map(this.map.hexes.map((hex) => [cellKey(hex.col, hex.row), hex])); }
   notesAt(col, row) { return this.map.notes.filter((note) => note.col === col && note.row === row); }
   tokensAt(col, row) { return this.map.tokens.filter((token) => token.col === col && token.row === row); }
+  selectedHex() { return this.selected ? this.hexState().get(cellKey(this.selected.col, this.selected.row)) || { ...this.selected, isFog: false, featureIcon: null, featureLabel: null, featureColor: null } : null; }
 
   render() {
-    const priorViewport = this.root.querySelector(".map-viewport");
-    const scroll = { left: priorViewport?.scrollLeft || 0, top: priorViewport?.scrollTop || 0 };
-    const settingsOpen = Boolean(this.root.querySelector(".map-settings")?.open);
-    const admin = this.getUser().isAdmin; const map = this.map; const zoomPercent = Math.round(this.zoom * 100);
-    const switcher = admin
-      ? `<label class="map-switcher-label">Map <select id="map-switcher">${this.maps.map((item) => option(String(item.id), item.name + (item.isActive ? " · Active" : ""), String(map.id))).join("")}</select></label>`
-      : `<span class="map-active-badge">Active world map</span>`;
-    const adminActions = admin ? `<button class="button ghost" data-map-action="create">＋ New map</button>
-      ${map.isActive ? '<span class="map-active-badge">Visible to players</span>' : '<button class="button" data-map-action="activate">Make active</button>'}
-      <button class="danger-button" data-map-action="delete-map">Delete map</button>` : "";
-    this.root.innerHTML = `<div class="document-header map-header"><div><div class="eyebrow">Exploration · Persistent world map</div>
-      <h1>${esc(map.name)}</h1><div class="document-meta">${map.columns} × ${map.rows} hexes · ${map.tokens.length} tokens · ${map.notes.length} notes</div></div></div>
-      <div class="map-toolbar">${switcher}<label class="map-zoom">Zoom <input id="map-zoom" type="range" min="35" max="160" value="${zoomPercent}"><output id="map-zoom-output">${zoomPercent}%</output></label>${adminActions}</div>
-      ${admin ? this.settingsHtml() : ""}
-      <div class="world-map-layout">
-        <section class="map-viewport" aria-label="${esc(map.name)} hex map">
-          <div class="map-stage-spacer" style="width:${map.mapWidth * this.zoom}px;height:${map.mapHeight * this.zoom}px">
-            <div class="map-surface ${admin ? "gm-map" : "player-map"}" style="width:${map.mapWidth}px;height:${map.mapHeight}px;transform:scale(${this.zoom})">
-              ${map.imagePath ? `<img class="map-background" src="/api/maps/${map.id}/image?v=${encodeURIComponent(map.updatedAt)}" alt="">` : '<div class="map-background-placeholder"><span>Map image not set</span></div>'}
-              ${this.gridHtml()}
-            </div>
-          </div>
-        </section>
-        <aside class="map-inspector">${this.inspectorHtml()}</aside>
-      </div>`;
-    const viewport = this.root.querySelector(".map-viewport");
-    if (viewport) { viewport.scrollLeft = scroll.left; viewport.scrollTop = scroll.top; }
+    const viewport = this.root.querySelector(".map-viewport"); const scroll = { left: viewport?.scrollLeft || 0, top: viewport?.scrollTop || 0 };
+    const settingsOpen = Boolean(this.root.querySelector(".map-settings")?.open); const admin = this.getUser().isAdmin; const map = this.map;
+    if (!admin) {
+      const showInspector = this.selected && !this.selectedHex()?.isFog;
+      this.root.innerHTML = `<header class="player-map-title"><h1>${esc(map.name)}</h1></header>
+        <div class="world-map-layout player-only ${showInspector ? "has-selection" : ""}">${this.viewportHtml()}${showInspector ? `<aside class="map-inspector">${this.inspectorHtml()}</aside>` : ""}</div>`;
+    } else {
+      const switcher = `<label class="map-switcher-label">Map <select id="map-switcher">${this.maps.map((item) => option(item.id, item.name + (item.isActive ? " · Active" : ""), map.id)).join("")}</select></label>`;
+      const active = map.isActive ? '<span class="map-active-badge">Visible to players</span>' : '<button class="button" data-map-action="activate">Make active</button>';
+      this.root.innerHTML = `<div class="document-header map-header"><div><div class="eyebrow">Exploration · Persistent world map</div><h1>${esc(map.name)}</h1>
+        <div class="document-meta"><span id="map-grid-summary">${map.columns} × ${map.rows} automatic grid</span><span>${map.tokens.length} tokens</span><span>${map.notes.length} notes</span></div></div></div>
+        <div class="map-toolbar">${switcher}<label class="map-zoom">View zoom <input id="map-zoom" type="range" min="35" max="160" value="${Math.round(this.zoom * 100)}"><output id="map-zoom-output">${Math.round(this.zoom * 100)}%</output></label>
+        <button class="button ghost" data-map-action="create">＋ New map</button>${active}<button class="danger-button" data-map-action="delete-map">Delete map</button></div>
+        ${this.settingsHtml()}${this.paintToolbarHtml()}<div class="world-map-layout">${this.viewportHtml()}<aside class="map-inspector">${this.inspectorHtml()}</aside></div>`;
+    }
+    const nextViewport = this.root.querySelector(".map-viewport"); if (nextViewport) { nextViewport.scrollLeft = scroll.left; nextViewport.scrollTop = scroll.top; }
     const settings = this.root.querySelector(".map-settings"); if (settings) settings.open = settingsOpen;
   }
 
+  viewportHtml() {
+    return `<section class="map-viewport" aria-label="${esc(this.map.name)} hex map"><div class="map-stage-spacer" style="width:${this.map.mapWidth * this.zoom}px;height:${this.map.mapHeight * this.zoom}px">${this.surfaceHtml()}</div></section>`;
+  }
+
+  surfaceHtml() {
+    const admin = this.getUser().isAdmin;
+    return `<div class="map-surface ${admin ? "gm-map paint-" + this.paintMode : "player-map"}" style="width:${this.map.mapWidth}px;height:${this.map.mapHeight}px;transform:scale(${this.zoom})">
+      ${this.map.imagePath ? `<img class="map-background" src="/api/maps/${this.map.id}/image?v=${encodeURIComponent(this.map.updatedAt)}" alt="">` : '<div class="map-background-placeholder"><span>Map image not set</span></div>'}${this.gridHtml()}</div>`;
+  }
+
+  renderStage() {
+    cancelAnimationFrame(this.stageFrame);
+    this.stageFrame = requestAnimationFrame(() => {
+      const viewport = this.root.querySelector(".map-viewport"); if (!viewport) return;
+      const scroll = { left: viewport.scrollLeft, top: viewport.scrollTop }; const spacer = viewport.querySelector(".map-stage-spacer");
+      spacer.style.width = this.map.mapWidth * this.zoom + "px"; spacer.style.height = this.map.mapHeight * this.zoom + "px"; spacer.innerHTML = this.surfaceHtml();
+      viewport.scrollLeft = scroll.left; viewport.scrollTop = scroll.top;
+    });
+  }
+
+  slider(name, label, min, max, step) {
+    return `<label class="map-range"><span>${label}<output data-map-output="${name}">${this.map[name]} px</output></span>
+      <input data-map-setting="${name}" type="range" min="${min}" max="${max}" step="${step}" value="${this.map[name]}"></label>`;
+  }
+
   settingsHtml() {
-    const map = this.map;
-    const images = ['<option value="">No background image</option>', ...this.images.map((image) => option(image.path, image.path, map.imagePath || ""))].join("");
-    return `<details class="map-settings"><summary>Map and grid settings</summary><div class="map-settings-body">
-      <form data-map-form="settings" class="map-settings-form">
-        <label class="wide">Map name<input name="name" value="${esc(map.name)}" required maxlength="80"></label>
-        <label class="wide">Background image<select name="imagePath">${images}</select></label>
-        <label>Map width<input name="mapWidth" type="number" min="320" max="6000" value="${map.mapWidth}"></label>
-        <label>Map height<input name="mapHeight" type="number" min="240" max="6000" value="${map.mapHeight}"></label>
-        <label>Grid columns<input name="columns" type="number" min="1" max="120" value="${map.columns}"></label>
-        <label>Grid rows<input name="rows" type="number" min="1" max="120" value="${map.rows}"></label>
-        <label>Hex size<input name="hexSize" type="number" min="10" max="240" step="1" value="${map.hexSize}"></label>
-        <label>X offset<input name="offsetX" type="number" min="-6000" max="6000" step="1" value="${map.offsetX}"></label>
-        <label>Y offset<input name="offsetY" type="number" min="-6000" max="6000" step="1" value="${map.offsetY}"></label>
-        <button class="button" type="submit">Save map settings</button>
-      </form>
-      <form data-map-form="upload" class="map-upload-form">
-        <div><strong>Upload a new map image</strong><small>The image becomes an ordinary wiki file in the chosen content folder.</small></div>
-        <label>Content folder<input name="folder" value="Maps" required></label>
-        <label>Image file<input name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/svg+xml" required></label>
-        <button class="button ghost" type="submit">Upload and use image</button>
-      </form>
-      <div class="map-fog-bulk"><div><strong>Fog of war</strong><small>Set a starting state for the complete grid, then adjust individual hexes from the inspector.</small></div>
-        <button class="button ghost" data-map-action="fog-all">Fog entire map</button><button class="button ghost" data-map-action="reveal-all">Reveal entire map</button></div>
-    </div></details>`;
+    const images = ['<option value="">No background image</option>', ...this.images.map((image) => option(image.path, image.path, this.map.imagePath || ""))].join("");
+    return `<details class="map-settings"><summary>Map and grid settings</summary><div class="map-settings-body"><div class="map-live-settings">
+      <label class="map-text-setting">Map name<input data-map-setting="name" value="${esc(this.map.name)}" required maxlength="80"></label>
+      <label class="map-text-setting">Background image<select data-map-setting="imagePath">${images}</select></label>
+      ${this.slider("mapWidth", "Map width", 480, 4000, 20)}${this.slider("mapHeight", "Map height", 320, 3000, 20)}
+      ${this.slider("hexSize", "Hex size", 16, 140, 1)}${this.slider("offsetX", "Grid X alignment", -140, 0, 1)}${this.slider("offsetY", "Grid Y alignment", -140, 0, 1)}
+      <div class="map-auto-grid"><span>Automatic coverage</span><strong data-map-auto-grid>${this.map.columns} × ${this.map.rows} hexes</strong></div></div>
+      <form data-map-form="upload" class="map-upload-form"><div><strong>Upload a new map image</strong><small>The image becomes an ordinary wiki file in the chosen content folder.</small></div>
+      <label>Content folder<input name="folder" value="Maps" required></label><label>Image file<input name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/svg+xml" required></label>
+      <button class="button ghost" type="submit">Upload and use image</button></form>
+      <div class="map-fog-bulk"><div><strong>Fog of war</strong><small>Set the complete grid, then refine it with the paint tools.</small></div>
+      <button class="button ghost" data-map-action="fog-all">Fog entire map</button><button class="button ghost" data-map-action="reveal-all">Reveal entire map</button></div></div></details>`;
+  }
+
+  paintToolbarHtml() {
+    const mode = (value, label) => `<button class="${this.paintMode === value ? "active" : ""}" data-map-mode="${value}">${label}</button>`;
+    return `<div class="map-paint-toolbar"><div class="map-paint-modes">${mode("inspect", "Inspect")}${mode("fog", "Paint fog")}${mode("reveal", "Reveal")}${mode("feature", "Place feature")}${mode("erase", "Erase feature")}</div>
+      <label>Feature brush<select id="map-paint-feature">${FEATURE_ICONS.map(([icon, label]) => option(icon, `${icon}  ${label}`, this.brush.featureIcon)).join("")}</select></label>
+      <label>Color<input id="map-paint-color" type="color" value="${this.brush.featureColor}"></label><span>Click or drag across hexes to paint.</span></div>`;
   }
 
   gridHtml() {
     const states = this.hexState(); const admin = this.getUser().isAdmin; const cells = [];
-    for (let row = 0; row < this.map.rows; row++) {
-      for (let col = 0; col < this.map.columns; col++) {
-        const key = cellKey(col, row); const hex = states.get(key) || { col, row, isFog: false };
-        const notes = this.notesAt(col, row).length; const selected = this.selected?.col === col && this.selected?.row === row;
-        const classes = ["map-hex", hex.isFog ? "is-fog" : "", (hex.featureIcon || hex.featureLabel) ? "has-feature" : "", notes ? "has-notes" : "", selected ? "is-selected" : ""].filter(Boolean).join(" ");
-        const center = hexCenter(this.map, col, row); const title = hex.isFog && !admin ? "Unexplored" : [`Hex ${col + 1}, ${row + 1}`, hex.featureLabel, notes ? `${notes} note${notes === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
-        cells.push(`<g class="${classes}" data-map-hex="${key}" style="--feature-color:${esc(hex.featureColor || "#a56a36")}">
-          <polygon points="${hexPoints(this.map, col, row)}"><title>${esc(title)}</title></polygon>
-          ${hex.featureIcon ? `<text class="map-feature-icon" x="${center.x}" y="${center.y + 7}">${esc(hex.featureIcon)}</text>` : ""}
-          ${notes && !(hex.isFog && !admin) ? `<circle class="map-note-dot" cx="${center.x + this.map.hexSize * .58}" cy="${center.y - this.map.hexSize * .55}" r="4"/>` : ""}
-        </g>`);
-      }
+    for (let row = 0; row < this.map.rows; row++) for (let col = 0; col < this.map.columns; col++) {
+      const key = cellKey(col, row); const hex = states.get(key) || { col, row, isFog: false }; const notes = this.notesAt(col, row).length;
+      const selected = this.selected?.col === col && this.selected?.row === row && !(!admin && hex.isFog);
+      const classes = ["map-hex", hex.isFog ? "is-fog" : "", (hex.featureIcon || hex.featureLabel) ? "has-feature" : "", notes ? "has-notes" : "", selected ? "is-selected" : ""].filter(Boolean).join(" ");
+      const center = hexCenter(this.map, col, row); const title = hex.isFog && !admin ? "Unexplored" : [hex.featureLabel, notes ? `${notes} note${notes === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "Unmarked";
+      cells.push(`<g class="${classes}" data-map-hex="${key}" style="--feature-color:${esc(hex.featureColor || "#a56a36")}"><polygon points="${hexPoints(this.map, col, row)}"><title>${esc(title)}</title></polygon>
+        ${hex.featureIcon ? `<text class="map-feature-icon" x="${center.x}" y="${center.y + 7}">${esc(hex.featureIcon)}</text>` : ""}${notes && !(hex.isFog && !admin) ? `<circle class="map-note-dot" cx="${center.x + this.map.hexSize * .58}" cy="${center.y - this.map.hexSize * .55}" r="4"/>` : ""}</g>`);
     }
     const tokens = this.map.tokens.map((token) => {
-      const center = hexCenter(this.map, token.col, token.row);
-      const cellTokens = this.tokensAt(token.col, token.row); const index = cellTokens.findIndex((item) => item.id === token.id);
-      const offset = (index - (cellTokens.length - 1) / 2) * Math.min(24, this.map.hexSize * .55);
-      return `<g class="map-token ${admin ? "is-draggable" : ""}" data-map-token="${token.id}" transform="translate(${center.x + offset} ${center.y})">
-        <circle r="17" style="fill:${esc(token.color)}"></circle><text class="map-token-icon" y="6">${esc(token.icon)}</text>
-        <text class="map-token-label" y="31">${esc(token.label)}</text><title>${esc(token.label)}</title></g>`;
+      const center = hexCenter(this.map, token.col, token.row); const siblings = this.tokensAt(token.col, token.row); const index = siblings.findIndex((item) => item.id === token.id);
+      const offset = (index - (siblings.length - 1) / 2) * Math.min(24, this.map.hexSize * .55);
+      return `<g class="map-token ${admin ? "is-draggable" : ""}" data-map-token="${token.id}" transform="translate(${center.x + offset} ${center.y})"><circle r="17" style="fill:${esc(token.color)}"></circle>
+        <text class="map-token-icon" y="6">${esc(token.icon)}</text><text class="map-token-label" y="31">${esc(token.label)}</text><title>${esc(token.label)}</title></g>`;
     }).join("");
-    return `<svg class="map-grid" viewBox="0 0 ${this.map.mapWidth} ${this.map.mapHeight}" width="${this.map.mapWidth}" height="${this.map.mapHeight}">
-      <defs><pattern id="map-fog-clouds" width="54" height="36" patternUnits="userSpaceOnUse"><rect width="54" height="36" fill="#777b78"/>
-      <circle cx="12" cy="20" r="13" fill="#aeb2ad"/><circle cx="29" cy="14" r="16" fill="#969b97"/><circle cx="46" cy="23" r="14" fill="#b8bbb6"/></pattern></defs>
+    return `<svg class="map-grid" viewBox="0 0 ${this.map.mapWidth} ${this.map.mapHeight}" width="${this.map.mapWidth}" height="${this.map.mapHeight}"><defs><pattern id="map-fog-clouds" width="54" height="36" patternUnits="userSpaceOnUse">
+      <rect width="54" height="36" fill="#777b78"/><circle cx="12" cy="20" r="13" fill="#aeb2ad"/><circle cx="29" cy="14" r="16" fill="#969b97"/><circle cx="46" cy="23" r="14" fill="#b8bbb6"/></pattern></defs>
       <g class="map-hex-layer">${cells.join("")}</g><g class="map-token-layer">${tokens}</g></svg>`;
+  }
+
+  notesHtml(notes) {
+    return notes.map((note) => {
+      const editable = this.getUser().isAdmin || note.userId === this.getUser().id;
+      return `<article class="map-note"><header><strong>${esc(note.author)}</strong><span>${new Date(note.updatedAt).toLocaleDateString()}</span></header><p>${esc(note.body)}</p>
+        ${editable ? `<footer><button data-map-note-edit="${note.id}">Edit</button><button data-map-note-delete="${note.id}">Remove</button></footer>` : ""}</article>`;
+    }).join("") || '<p class="map-muted">No notes on this hex.</p>';
   }
 
   inspectorHtml() {
     if (!this.selected) return '<div class="map-inspector-empty"><span>⬡</span><h2>Select a hex</h2><p>Open a hex to view its features, notes, and tokens.</p></div>';
-    const { col, row } = this.selected; const admin = this.getUser().isAdmin;
-    const hex = this.hexState().get(cellKey(col, row)) || { col, row, isFog: false, featureIcon: "", featureLabel: "", featureColor: "#a56a36" };
-    if (hex.isFog && !admin) return `<div class="map-inspector-empty"><span>☁</span><h2>Unexplored</h2><p>Knowledge of hex ${col + 1}, ${row + 1} is hidden by fog of war.</p></div>`;
-    const notes = this.notesAt(col, row); const tokens = this.tokensAt(col, row);
-    const featureChoices = FEATURE_ICONS.map(([icon, label]) => `<label title="${esc(label)}"><input type="radio" name="featureIcon" value="${esc(icon)}" ${hex.featureIcon === icon ? "checked" : ""}><span>${icon}</span><small>${esc(label)}</small></label>`).join("");
-    const notesHtml = notes.map((note) => {
-      const editable = admin || note.userId === this.getUser().id;
-      return `<article class="map-note"><header><strong>${esc(note.author)}</strong><span>${new Date(note.updatedAt).toLocaleDateString()}</span></header><p>${esc(note.body)}</p>
-        ${editable ? `<footer><button data-map-note-edit="${note.id}">Edit</button><button data-map-note-delete="${note.id}">Remove</button></footer>` : ""}</article>`;
-    }).join("") || '<p class="map-muted">No notes on this hex.</p>';
+    const { col, row } = this.selected; const admin = this.getUser().isAdmin; const hex = this.selectedHex();
+    if (hex.isFog && !admin) return "";
+    const notes = this.notesAt(col, row);
+    if (!admin) return `<div class="map-inspector-head player-hex-head"><h2>${esc(hex.featureLabel || "Unmarked territory")}</h2><button data-map-action="close-hex" aria-label="Close">×</button></div>
+      <section class="map-inspector-section"><h3>Notes</h3><div class="map-notes">${this.notesHtml(notes)}</div>
+      <form data-map-form="note" class="map-note-form"><textarea name="body" required maxlength="4000" placeholder="Add a note…"></textarea><button class="button ghost" type="submit">Add note</button></form></section>`;
+    const featureChoices = FEATURE_ICONS.map(([icon, label]) => `<label title="${esc(label)}"><input data-map-feature type="radio" name="featureIcon" value="${esc(icon)}" ${hex.featureIcon === icon ? "checked" : ""}><span>${icon}</span><small>${esc(label)}</small></label>`).join("");
     const tokenOptions = (selected) => TOKEN_ICONS.map(([icon, label]) => option(icon, `${icon}  ${label}`, selected)).join("");
-    const tokensHtml = admin ? tokens.map((token) => `<form data-map-form="token-edit" data-token-id="${token.id}" class="map-token-form">
-      <input name="label" value="${esc(token.label)}" required maxlength="80" aria-label="Token label"><select name="icon" aria-label="Token icon">${tokenOptions(token.icon)}</select>
-      <input name="color" type="color" value="${esc(token.color)}" aria-label="Token color"><button type="submit">Save</button><button type="button" data-map-token-delete="${token.id}">×</button></form>`).join("") : "";
-    return `<div class="map-inspector-head"><div><span>Hex ${col + 1}, ${row + 1}</span><h2>${esc(hex.featureLabel || "Unmarked territory")}</h2></div><button data-map-action="close-hex" aria-label="Close inspector">×</button></div>
-      ${admin ? `<form data-map-form="hex" class="map-hex-form"><label class="map-fog-toggle"><input name="isFog" type="checkbox" ${hex.isFog ? "checked" : ""}><span>Fog of war</span></label>
-        <label>Feature name<input name="featureLabel" value="${esc(hex.featureLabel || "")}" maxlength="80" placeholder="Ancient watchtower"></label>
-        <div class="feature-icon-grid">${featureChoices}</div><label>Marker color<input name="featureColor" type="color" value="${esc(hex.featureColor || "#a56a36")}"></label>
-        <div class="map-form-actions"><button class="button" type="submit">Save hex</button><button class="button ghost" type="button" data-map-action="clear-feature">Clear feature</button></div></form>` : ""}
-      <section class="map-inspector-section"><h3>Notes</h3><div class="map-notes">${notesHtml}</div>
-        <form data-map-form="note" class="map-note-form"><textarea name="body" required maxlength="4000" placeholder="Add something the table should remember…"></textarea><button class="button ghost" type="submit">Add note</button></form></section>
-      ${admin ? `<section class="map-inspector-section"><h3>Tokens</h3>${tokensHtml || '<p class="map-muted">No tokens on this hex.</p>'}
-        <form data-map-form="token-new" class="map-token-form"><input name="label" required maxlength="80" placeholder="Party or group name"><select name="icon">${tokenOptions("●")}</select>
-        <input name="color" type="color" value="#386b57" aria-label="Token color"><button class="button ghost" type="submit">Add</button></form></section>` : ""}`;
+    const tokenForms = this.tokensAt(col, row).map((token) => `<form data-map-form="token-edit" data-token-id="${token.id}" class="map-token-form"><input name="label" value="${esc(token.label)}" required maxlength="80">
+      <select name="icon">${tokenOptions(token.icon)}</select><input name="color" type="color" value="${esc(token.color)}"><button type="submit">Save</button><button type="button" data-map-token-delete="${token.id}">×</button></form>`).join("");
+    const templates = '<option value="">Apply a template…</option>' + this.templates.map((template) => option(template.id, template.name, this.selectedTemplateId)).join("");
+    return `<div class="map-inspector-head"><div><span>Hex ${col + 1}, ${row + 1}</span><h2>${esc(hex.featureLabel || "Unmarked territory")}</h2></div><button data-map-action="close-hex">×</button></div>
+      <div class="map-template-tools"><select id="map-hex-template">${templates}</select><button data-map-action="save-template" title="Save this hex as a template">＋ Template</button>
+      <button data-map-action="delete-template" title="Delete selected template" ${this.selectedTemplateId ? "" : "disabled"}>×</button><small>Applying a template replaces this hex's feature and notes.</small></div>
+      <div class="map-hex-form"><label class="map-fog-toggle"><input data-map-feature name="isFog" type="checkbox" ${hex.isFog ? "checked" : ""}><span>Fog of war</span></label>
+        <label>Feature name<input data-map-feature name="featureLabel" value="${esc(hex.featureLabel || "")}" maxlength="80" placeholder="Ancient watchtower"></label>
+        <div class="feature-icon-grid">${featureChoices}</div><label>Marker color<input data-map-feature name="featureColor" type="color" value="${esc(hex.featureColor || "#a56a36")}"></label>
+        <div class="map-form-actions"><span>Changes save automatically.</span><button class="button ghost" type="button" data-map-action="clear-feature">Clear feature</button></div></div>
+      <section class="map-inspector-section"><h3>Notes</h3><div class="map-notes">${this.notesHtml(notes)}</div><form data-map-form="note" class="map-note-form">
+        <textarea name="body" required maxlength="4000" placeholder="Add something the table should remember…"></textarea><button class="button ghost" type="submit">Add note</button></form></section>
+      <section class="map-inspector-section"><h3>Tokens</h3>${tokenForms || '<p class="map-muted">No tokens on this hex.</p>'}<form data-map-form="token-new" class="map-token-form">
+        <input name="label" required maxlength="80" placeholder="Party or group name"><select name="icon">${tokenOptions("●")}</select><input name="color" type="color" value="#386b57"><button class="button ghost" type="submit">Add</button></form></section>`;
   }
 
   async perform(work, success) {
-    try { await work(); if (success) this.toast(success); }
-    catch (error) { this.toast(error.message); }
+    try { await work(); if (success) this.toast(success); return true; }
+    catch (error) { this.toast(error.message); return false; }
   }
-
   async refreshLists(selectId = this.map?.id) {
     this.maps = await this.api("/api/maps");
-    this.images = this.getUser().isAdmin ? await this.api("/api/maps/images") : [];
+    if (this.getUser().isAdmin) [this.images, this.templates] = await Promise.all([this.api("/api/maps/images"), this.api("/api/maps/templates")]);
     const target = this.maps.find((item) => item.id === selectId) || this.maps.find((item) => item.isActive) || this.maps[0];
     if (target) await this.load(target.id); else { this.map = null; this.renderEmpty(); }
   }
@@ -187,68 +198,116 @@ export class WorldMapView {
     if (action === "fog-all") return this.setAllFog(true);
     if (action === "reveal-all") return this.setAllFog(false);
     if (action === "close-hex") { this.selected = null; return this.render(); }
-    if (action === "clear-feature") return this.saveHex({ isFog: this.hexState().get(cellKey(this.selected.col, this.selected.row))?.isFog, featureIcon: null, featureLabel: null, featureColor: null }, "Feature cleared");
-    const editNote = event.target.closest("[data-map-note-edit]");
-    if (editNote) return this.editNote(Number(editNote.dataset.mapNoteEdit));
-    const deleteNote = event.target.closest("[data-map-note-delete]");
-    if (deleteNote) return this.deleteNote(Number(deleteNote.dataset.mapNoteDelete));
-    const deleteToken = event.target.closest("[data-map-token-delete]");
-    if (deleteToken) return this.deleteToken(Number(deleteToken.dataset.mapTokenDelete));
+    if (action === "clear-feature") return this.clearFeature();
+    if (action === "save-template") return this.saveTemplate();
+    if (action === "delete-template") return this.deleteTemplate();
+    const mode = event.target.closest("[data-map-mode]")?.dataset.mapMode;
+    if (mode) { this.paintMode = mode; return this.render(); }
+    const editNote = event.target.closest("[data-map-note-edit]"); if (editNote) return this.editNote(Number(editNote.dataset.mapNoteEdit));
+    const deleteNote = event.target.closest("[data-map-note-delete]"); if (deleteNote) return this.deleteNote(Number(deleteNote.dataset.mapNoteDelete));
+    const deleteToken = event.target.closest("[data-map-token-delete]"); if (deleteToken) return this.deleteToken(Number(deleteToken.dataset.mapTokenDelete));
+    if (Date.now() < this.suppressClickUntil) return;
     const token = event.target.closest("[data-map-token]");
-    if (token && Date.now() > this.suppressClickUntil) {
-      const item = this.map.tokens.find((entry) => entry.id === Number(token.dataset.mapToken));
-      if (item) { this.selected = { col: item.col, row: item.row }; this.render(); }
-      return;
-    }
+    if (token) { const item = this.map.tokens.find((entry) => entry.id === Number(token.dataset.mapToken)); if (item) { this.selected = { col: item.col, row: item.row }; this.render(); } return; }
     const cell = event.target.closest("[data-map-hex]");
-    if (cell) { const [col, row] = cell.dataset.mapHex.split(":").map(Number); this.selected = { col, row }; this.render(); }
+    if (cell && this.paintMode === "inspect") { const [col, row] = cell.dataset.mapHex.split(":").map(Number); this.selected = { col, row }; this.render(); }
   }
 
   async createMap() {
-    const name = window.prompt("Name this world map:");
-    if (!name?.trim()) return;
-    await this.perform(async () => {
-      const map = await this.api("/api/maps", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) });
-      this.selected = null; await this.refreshLists(map.id);
-    }, "Map created");
+    const name = window.prompt("Name this world map:"); if (!name?.trim()) return;
+    await this.perform(async () => { const map = await this.api("/api/maps", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) }); this.selected = null; await this.refreshLists(map.id); }, "Map created");
   }
-
   async deleteMap() {
     if (!window.confirm(`Delete "${this.map.name}" and all of its hex notes and tokens?`)) return;
     await this.perform(async () => { await this.api(`/api/maps/${this.map.id}`, { method: "DELETE" }); this.selected = null; await this.refreshLists(null); }, "Map deleted");
   }
-
   setAllFog(isFog) {
-    const label = isFog ? "cover the complete map in fog" : "reveal every hex";
-    if (!window.confirm(`Do you want to ${label}? Existing features, notes, and tokens are retained.`)) return;
-    return this.perform(async () => {
-      await this.api(`/api/maps/${this.map.id}/fog`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ isFog }) });
-      await this.load(this.map.id);
-    }, isFog ? "Map covered in fog" : "Map fully revealed");
+    if (!window.confirm(isFog ? "Cover the complete map in fog?" : "Reveal every hex on this map?")) return;
+    return this.perform(async () => { await this.api(`/api/maps/${this.map.id}/fog`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ isFog }) }); await this.load(this.map.id); }, isFog ? "Map covered in fog" : "Map fully revealed");
   }
 
   change(event) {
-    if (event.target.matches("#map-switcher")) this.load(Number(event.target.value)).catch((error) => this.toast(error.message));
+    if (event.target.matches("#map-switcher")) return this.load(Number(event.target.value)).catch((error) => this.toast(error.message));
+    if (event.target.matches("[data-map-setting]")) return this.persistMapSetting(event.target);
+    if (event.target.matches("[data-map-feature]")) { this.updateSelectedHexFromControls(); return this.persistSelectedHex(); }
+    if (event.target.matches("#map-paint-feature")) { const found = FEATURE_ICONS.find(([icon]) => icon === event.target.value); [this.brush.featureIcon, this.brush.featureLabel] = found; return; }
+    if (event.target.matches("#map-paint-color")) { this.brush.featureColor = event.target.value; return; }
+    if (event.target.matches("#map-hex-template") && event.target.value) return this.applyTemplate(Number(event.target.value));
   }
 
   input(event) {
-    if (!event.target.matches("#map-zoom")) return;
-    this.zoom = Number(event.target.value) / 100;
-    const output = this.root.querySelector("#map-zoom-output"); if (output) output.textContent = event.target.value + "%";
-    const spacer = this.root.querySelector(".map-stage-spacer"); const surface = this.root.querySelector(".map-surface");
-    if (spacer && surface) { spacer.style.width = this.map.mapWidth * this.zoom + "px"; spacer.style.height = this.map.mapHeight * this.zoom + "px"; surface.style.transform = `scale(${this.zoom})`; }
+    if (event.target.matches("#map-zoom")) {
+      this.zoom = Number(event.target.value) / 100; this.root.querySelector("#map-zoom-output").textContent = event.target.value + "%"; return this.renderStage();
+    }
+    if (event.target.matches("[data-map-setting]")) {
+      const key = event.target.dataset.mapSetting; if (!["mapWidth","mapHeight","hexSize","offsetX","offsetY"].includes(key)) return;
+      this.map[key] = Number(event.target.value); Object.assign(this.map, gridDimensions(this.map)); this.root.querySelector(`[data-map-output="${key}"]`).textContent = event.target.value + " px";
+      this.root.querySelector("[data-map-auto-grid]").textContent = `${this.map.columns} × ${this.map.rows} hexes`;
+      this.root.querySelector("#map-grid-summary").textContent = `${this.map.columns} × ${this.map.rows} automatic grid`; this.renderStage(); return;
+    }
+    if (event.target.matches("[data-map-feature]")) { this.updateSelectedHexFromControls(); clearTimeout(this.hexSaveTimer); this.hexSaveTimer = setTimeout(() => this.persistSelectedHex(), 350); }
+  }
+
+  async persistMapSetting(control) {
+    const key = control.dataset.mapSetting; const geometry = ["mapWidth","mapHeight","hexSize","offsetX","offsetY"];
+    const patch = geometry.includes(key) ? Object.fromEntries(geometry.map((name) => [name, this.map[name]])) : { [key]: control.value };
+    if (geometry.includes(key)) {
+      try {
+        const impact = await this.api(`/api/maps/${this.map.id}/resize-impact`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
+        if (impact.total) {
+          const details = [impact.features ? `${impact.features} feature hex${impact.features === 1 ? "" : "es"}` : "", impact.notes ? `${impact.notes} note${impact.notes === 1 ? "" : "s"}` : "", impact.tokens ? `${impact.tokens} token${impact.tokens === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
+          if (!window.confirm(`This adjustment removes ${details} outside the new automatic grid. Fog-only hexes are discarded silently. Continue?`)) { this.map = clone(this.persistedMap); return this.render(); }
+        }
+      } catch (error) { this.toast(error.message); this.map = clone(this.persistedMap); return this.render(); }
+    }
+    const saved = await this.perform(async () => { await this.api(`/api/maps/${this.map.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }); await this.refreshLists(); }, "Map updated");
+    if (!saved) { this.map = clone(this.persistedMap); this.render(); }
+  }
+
+  updateSelectedHexFromControls() {
+    if (!this.selected) return; const root = this.root.querySelector(".map-hex-form"); if (!root) return;
+    const next = { ...this.selectedHex(), ...this.selected, isFog: root.querySelector('[name="isFog"]').checked,
+      featureIcon: root.querySelector('[name="featureIcon"]:checked')?.value || null, featureLabel: root.querySelector('[name="featureLabel"]').value,
+      featureColor: root.querySelector('[name="featureColor"]').value };
+    const index = this.map.hexes.findIndex((hex) => hex.col === next.col && hex.row === next.row);
+    if (index >= 0) this.map.hexes[index] = next; else this.map.hexes.push(next); this.renderStage();
+  }
+
+  async persistSelectedHex() {
+    clearTimeout(this.hexSaveTimer); const hex = this.selectedHex(); if (!hex) return;
+    const saved = await this.perform(async () => { await this.api(`/api/maps/${this.map.id}/hex`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(hex) }); this.persistedMap = clone(this.map); });
+    if (!saved) { this.map = clone(this.persistedMap); this.render(); }
+  }
+
+  clearFeature() {
+    const hex = { ...this.selectedHex(), featureIcon: null, featureLabel: null, featureColor: null };
+    const index = this.map.hexes.findIndex((item) => item.col === hex.col && item.row === hex.row); if (index >= 0) this.map.hexes[index] = hex; else this.map.hexes.push(hex);
+    this.render(); return this.persistSelectedHex();
+  }
+
+  async saveTemplate() {
+    const name = window.prompt("Template name:"); if (!name?.trim()) return; const hex = this.selectedHex();
+    await this.perform(async () => {
+      const created = await this.api("/api/maps/templates", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+        name, featureIcon: hex.featureIcon, featureLabel: hex.featureLabel, featureColor: hex.featureColor, notes: this.notesAt(hex.col, hex.row).map((note) => note.body)
+      }) });
+      this.templates = await this.api("/api/maps/templates"); this.selectedTemplateId = created.id; this.render();
+    }, "Hex template saved");
+  }
+
+  applyTemplate(templateId) {
+    this.selectedTemplateId = templateId;
+    return this.perform(async () => { await this.api(`/api/maps/${this.map.id}/hex/template`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...this.selected, templateId }) }); await this.load(this.map.id); }, "Template applied");
+  }
+
+  deleteTemplate() {
+    if (!this.selectedTemplateId || !window.confirm("Delete this hex template?")) return;
+    return this.perform(async () => { await this.api(`/api/maps/templates/${this.selectedTemplateId}`, { method: "DELETE" }); this.selectedTemplateId = null; this.templates = await this.api("/api/maps/templates"); this.render(); }, "Template deleted");
   }
 
   async submit(event) {
-    const form = event.target.closest("[data-map-form]"); if (!form) return;
-    event.preventDefault(); const data = new FormData(form); const kind = form.dataset.mapForm;
-    if (kind === "settings") {
-      const input = Object.fromEntries(data); for (const key of ["mapWidth","mapHeight","columns","rows","hexSize","offsetX","offsetY"]) input[key] = Number(input[key]);
-      if ((input.columns < this.map.columns || input.rows < this.map.rows) && !window.confirm("Shrinking the grid removes notes, features, and tokens that fall outside its new bounds. Continue?")) return;
-      return this.perform(async () => { await this.api(`/api/maps/${this.map.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input) }); await this.refreshLists(); }, "Map settings saved");
-    }
+    const form = event.target.closest("[data-map-form]"); if (!form) return; event.preventDefault(); const data = new FormData(form); const kind = form.dataset.mapForm;
     if (kind === "upload") return this.uploadImage(form, data);
-    if (kind === "hex") return this.saveHex({ col: this.selected.col, row: this.selected.row, isFog: data.has("isFog"), featureIcon: data.get("featureIcon") || null, featureLabel: data.get("featureLabel"), featureColor: data.get("featureColor") }, "Hex updated");
     if (kind === "note") return this.perform(async () => { await this.api(`/api/maps/${this.map.id}/notes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...this.selected, body: data.get("body") }) }); await this.load(this.map.id); }, "Note added");
     if (kind === "token-new") return this.perform(async () => { await this.api(`/api/maps/${this.map.id}/tokens`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...this.selected, label: data.get("label"), icon: data.get("icon"), color: data.get("color") }) }); await this.load(this.map.id); }, "Token added");
     if (kind === "token-edit") return this.perform(async () => { await this.api(`/api/maps/${this.map.id}/tokens/${form.dataset.tokenId}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: data.get("label"), icon: data.get("icon"), color: data.get("color") }) }); await this.load(this.map.id); }, "Token updated");
@@ -258,66 +317,66 @@ export class WorldMapView {
     const file = data.get("image"); if (!(file instanceof File) || !file.size) return this.toast("Choose an image");
     if (file.size > 50 * 1024 * 1024) return this.toast("Images must be 50 MB or smaller");
     await this.perform(async () => {
-      const encoded = await new Promise((resolve, reject) => {
-        const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",", 2)[1]); reader.onerror = () => reject(new Error("Could not read that image")); reader.readAsDataURL(file);
-      });
+      const encoded = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",", 2)[1]); reader.onerror = () => reject(new Error("Could not read that image")); reader.readAsDataURL(file); });
       const uploaded = await this.api("/api/maps/images", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ folder: data.get("folder"), name: file.name, data: encoded }) });
-      await this.api(`/api/maps/${this.map.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ imagePath: uploaded.path }) });
-      form.reset(); await this.refreshLists();
+      await this.api(`/api/maps/${this.map.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ imagePath: uploaded.path }) }); form.reset(); await this.refreshLists();
     }, "Image uploaded and selected");
   }
 
-  saveHex(input, message) {
-    return this.perform(async () => {
-      await this.api(`/api/maps/${this.map.id}/hex`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...this.selected, ...input }) });
-      await this.load(this.map.id);
-    }, message);
-  }
-
   editNote(noteId) {
-    const note = this.map.notes.find((item) => item.id === noteId); if (!note) return;
-    const body = window.prompt("Edit note:", note.body); if (!body?.trim() || body === note.body) return;
+    const note = this.map.notes.find((item) => item.id === noteId); if (!note) return; const body = window.prompt("Edit note:", note.body); if (!body?.trim() || body === note.body) return;
     return this.perform(async () => { await this.api(`/api/maps/${this.map.id}/notes/${noteId}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ body }) }); await this.load(this.map.id); }, "Note updated");
   }
+  deleteNote(noteId) { if (!window.confirm("Remove this note?")) return; return this.perform(async () => { await this.api(`/api/maps/${this.map.id}/notes/${noteId}`, { method: "DELETE" }); await this.load(this.map.id); }, "Note removed"); }
+  deleteToken(tokenId) { return this.perform(async () => { await this.api(`/api/maps/${this.map.id}/tokens/${tokenId}`, { method: "DELETE" }); await this.load(this.map.id); }, "Token removed"); }
 
-  deleteNote(noteId) {
-    if (!window.confirm("Remove this note?")) return;
-    return this.perform(async () => { await this.api(`/api/maps/${this.map.id}/notes/${noteId}`, { method: "DELETE" }); await this.load(this.map.id); }, "Note removed");
+  paintInput(col, row) {
+    const existing = this.hexState().get(cellKey(col, row)) || { col, row, isFog: false, featureIcon: null, featureLabel: null, featureColor: null };
+    if (this.paintMode === "fog") return { ...existing, isFog: true };
+    if (this.paintMode === "reveal") return { ...existing, isFog: false };
+    if (this.paintMode === "feature") return { ...existing, ...this.brush };
+    if (this.paintMode === "erase") return { ...existing, featureIcon: null, featureLabel: null, featureColor: null };
+    return null;
   }
 
-  deleteToken(tokenId) {
-    return this.perform(async () => { await this.api(`/api/maps/${this.map.id}/tokens/${tokenId}`, { method: "DELETE" }); await this.load(this.map.id); }, "Token removed");
+  paintCell(node) {
+    if (!node) return; const [col, row] = node.dataset.mapHex.split(":").map(Number); const key = cellKey(col, row);
+    if (this.paintStroke.has(key)) return; const input = this.paintInput(col, row); if (!input) return; this.paintStroke.set(key, input);
+    const index = this.map.hexes.findIndex((hex) => hex.col === col && hex.row === row); if (index >= 0) this.map.hexes[index] = input; else this.map.hexes.push(input);
+    this.renderStage();
   }
 
   pointerDown(event) {
-    const node = event.target.closest("[data-map-token]");
-    if (!node || !this.getUser().isAdmin || !this.root.contains(node)) return;
-    event.preventDefault(); const token = this.map.tokens.find((item) => item.id === Number(node.dataset.mapToken)); if (!token) return;
-    this.drag = { node, token, startX: event.clientX, startY: event.clientY, moved: false };
+    const tokenNode = event.target.closest("[data-map-token]");
+    if (tokenNode && this.getUser().isAdmin && this.paintMode === "inspect") {
+      event.preventDefault(); const token = this.map.tokens.find((item) => item.id === Number(tokenNode.dataset.mapToken)); if (token) this.drag = { node: tokenNode, token, startX: event.clientX, startY: event.clientY, moved: false }; return;
+    }
+    const cell = event.target.closest("[data-map-hex]");
+    if (cell && this.getUser().isAdmin && this.paintMode !== "inspect") { event.preventDefault(); this.paintStroke = new Map(); this.paintCell(cell); }
   }
 
   pointerMove(event) {
-    if (!this.drag) return;
-    const rect = this.root.querySelector(".map-grid")?.getBoundingClientRect(); if (!rect) return;
-    const x = (event.clientX - rect.left) / rect.width * this.map.mapWidth;
-    const y = (event.clientY - rect.top) / rect.height * this.map.mapHeight;
-    if (Math.hypot(event.clientX - this.drag.startX, event.clientY - this.drag.startY) > 4) this.drag.moved = true;
-    this.drag.node.setAttribute("transform", `translate(${x} ${y})`);
+    if (this.paintStroke) { const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-map-hex]"); if (cell && this.root.contains(cell)) this.paintCell(cell); return; }
+    if (!this.drag) return; const rect = this.root.querySelector(".map-grid")?.getBoundingClientRect(); if (!rect) return;
+    const x = (event.clientX - rect.left) / rect.width * this.map.mapWidth; const y = (event.clientY - rect.top) / rect.height * this.map.mapHeight;
+    if (Math.hypot(event.clientX - this.drag.startX, event.clientY - this.drag.startY) > 4) this.drag.moved = true; this.drag.node.setAttribute("transform", `translate(${x} ${y})`);
   }
 
   pointerUp(event) {
-    if (!this.drag) return;
-    const drag = this.drag; this.drag = null;
-    if (!drag.moved) return;
-    this.suppressClickUntil = Date.now() + 250;
+    if (this.paintStroke) {
+      const stroke = [...this.paintStroke.values()]; this.paintStroke = null; this.suppressClickUntil = Date.now() + 250;
+      return this.savePaintStroke(stroke);
+    }
+    if (!this.drag) return; const drag = this.drag; this.drag = null; if (!drag.moved) return; this.suppressClickUntil = Date.now() + 250;
     const rect = this.root.querySelector(".map-grid")?.getBoundingClientRect(); if (!rect) return this.render();
-    const x = (event.clientX - rect.left) / rect.width * this.map.mapWidth;
-    const y = (event.clientY - rect.top) / rect.height * this.map.mapHeight;
-    const cell = nearestHex(this.map, x, y);
-    this.render();
-    this.perform(async () => {
-      await this.api(`/api/maps/${this.map.id}/tokens/${drag.token.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(cell) });
-      this.selected = cell; await this.load(this.map.id);
-    }, "Token moved");
+    const cell = nearestHex(this.map, (event.clientX - rect.left) / rect.width * this.map.mapWidth, (event.clientY - rect.top) / rect.height * this.map.mapHeight); this.render();
+    this.perform(async () => { await this.api(`/api/maps/${this.map.id}/tokens/${drag.token.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(cell) }); this.selected = cell; await this.load(this.map.id); }, "Token moved");
   }
+
+  async savePaintStroke(stroke) {
+    const saved = await this.perform(async () => { await this.api(`/api/maps/${this.map.id}/hexes`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ hexes: stroke }) }); this.persistedMap = clone(this.map); }, `${stroke.length} hex${stroke.length === 1 ? "" : "es"} painted`);
+    if (!saved) { this.map = clone(this.persistedMap); this.render(); }
+  }
+
+  cancelPointer() { if (this.paintStroke || this.drag) { this.paintStroke = null; this.drag = null; this.map = clone(this.persistedMap); this.render(); } }
 }

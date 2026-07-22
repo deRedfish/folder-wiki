@@ -170,18 +170,19 @@ Users, roles, sessions, and role visibility grants are stored in `.folder-wiki/w
 
 Every logged-in user can open **World map**. Players see only the map currently made active by an administrator. Administrators can create any number of maps, switch between them, and choose which single map is active for players.
 
-Open **Map and grid settings** to choose any image already stored in the wiki or upload a new image to a chosen folder under `content/`. Map width, map height, grid columns, grid rows, hex size, and horizontal or vertical grid offsets are independently adjustable. Reducing the row or column count warns before removing anything outside the new bounds.
+Open **Map and grid settings** to choose any image already stored in the wiki or upload a new image to a chosen folder under `content/`. Sliders adjust the map width, map height, hex size, and horizontal or vertical grid alignment with an immediate preview; releasing a slider persists the change. The grid automatically adds or removes rows and columns to cover the available map. Before an adjustment removes out-of-bounds features, notes, or tokens, the wiki identifies the affected content and asks for confirmation. Fog-only cells need no confirmation.
 
 Select a hex to open its inspector. Administrators can:
 
-- cover or reveal individual hexes, or set the fog state of the complete grid;
-- assign fantasy feature icons, labels, and colors;
+- paint fog, reveal terrain, place features, or erase features across several hexes by clicking and dragging;
+- assign fantasy feature icons, labels, and colors, with changes saved automatically;
+- save a hex's feature and notes as a reusable template, then apply that template from the hex inspector;
 - add labelled, colored tokens and drag them between hexes;
 - edit or remove any shared note.
 
-All users can add notes to revealed hexes and edit or remove their own notes. Hexes with visible notes receive a distinct outline. Fogged hexes remain inspectable to administrators with a darkened treatment, but player API responses remove their feature data, notes, and tokens before the data reaches the browser. Players see a uniform cloudy hex instead.
+All users can add notes to revealed hexes and edit or remove their own notes. Hexes with visible notes receive a distinct outline. Fogged hexes remain inspectable to administrators with a darkened treatment, but player API responses remove their feature data, notes, and tokens before the data reaches the browser. Players see a uniform cloudy hex instead. The player view intentionally contains only the active map's title and map; selecting a revealed hex opens its feature name and shared notes without exposing GM controls or map settings.
 
-Map configuration, hex state, notes, tokens, and the active-map choice are stored in `.folder-wiki/wiki.db`. Uploaded backgrounds remain ordinary files in `content/`, so back up both locations.
+Map configuration, hex state, reusable templates, notes, tokens, and the active-map choice are stored in `.folder-wiki/wiki.db`. Uploaded backgrounds remain ordinary files in `content/`, so back up both locations.
 
 ## Local browser data
 
