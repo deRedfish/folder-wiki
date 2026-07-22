@@ -45,14 +45,29 @@ test("maps persist configuration and expose only the active map to viewers", asy
   assert.throws(() => maps.updateNote(second.id, visibleNote.id, "Changed", gm.id, false), /own notes/);
   assert.throws(() => maps.deleteNote(second.id, visibleNote.id, gm.id, false), /own notes/);
   maps.updateNote(second.id, visibleNote.id, "Safe bridge.", player.id, false);
+  assert.deepEqual(maps.resizeImpact(second.id, { mapWidth: 320, mapHeight: 240, hexSize: 240, offsetX: 0, offsetY: 0 }), {
+    columns: 2, rows: 2, features: 1, notes: 1, tokens: 1, total: 3
+  });
   maps.deleteToken(second.id, hiddenToken.id);
 
-  maps.updateMap(second.id, { columns: 2, rows: 2, mapWidth: 900, mapHeight: 600, hexSize: 30 });
+  maps.updateMap(second.id, { mapWidth: 320, mapHeight: 240, hexSize: 240, offsetX: 0, offsetY: 0 });
   const resized = maps.getMap(second.id, true);
-  assert.equal(resized.mapWidth, 900);
+  assert.equal(resized.mapWidth, 320);
+  assert.equal(resized.columns, 2);
+  assert.equal(resized.rows, 2);
   assert.equal(resized.hexes.length, 0);
   assert.equal(resized.tokens.length, 1);
   assert.equal(resized.notes.length, 1);
+  maps.setHexes(second.id, [
+    { col: 0, row: 0, isFog: true, featureIcon: null, featureLabel: null, featureColor: null },
+    { col: 1, row: 0, isFog: true, featureIcon: "🏰", featureLabel: "Border keep", featureColor: "#a56a36" }
+  ]);
+  const template = maps.createTemplate({ name: "Ruined Keep", featureIcon: "🏰", featureLabel: "Ruined keep", featureColor: "#8b3f35", notes: ["Collapsed gate", "Old heraldry"] }, gm.id);
+  maps.applyTemplate(second.id, { col: 0, row: 1, templateId: template.id }, gm.id);
+  const templated = maps.getMap(second.id, true);
+  assert.equal(templated.hexes.find((hex) => hex.col === 0 && hex.row === 1).featureLabel, "Ruined keep");
+  assert.deepEqual(templated.notes.filter((note) => note.col === 0 && note.row === 1).map((note) => note.body), ["Collapsed gate", "Old heraldry"]);
+  maps.deleteTemplate(template.id);
   maps.setAllFog(second.id, true);
   assert.equal(maps.getMap(second.id, true).hexes.filter((hex) => hex.isFog).length, 4);
   maps.setAllFog(second.id, false);

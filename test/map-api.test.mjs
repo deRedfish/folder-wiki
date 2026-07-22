@@ -54,6 +54,20 @@ test("map APIs enforce GM editing and redact fogged content from players", async
   assert.deepEqual(playerMap.tokens, []);
   assert.equal((await fetch(`${base}/api/maps/${created.id}/fog`, jsonRequest(playerCookie, "PUT", { isFog: false }))).status, 403);
   assert.equal((await fetch(`${base}/api/maps/${created.id}/fog`, jsonRequest(gmCookie, "PUT", { isFog: false }))).status, 200);
+  assert.equal((await fetch(`${base}/api/maps/templates`, withSession(playerCookie))).status, 403);
+  const template = await fetch(`${base}/api/maps/templates`, jsonRequest(gmCookie, "POST", {
+    name: "Ancient Shrine", featureIcon: "⛩", featureLabel: "Ancient shrine", featureColor: "#a56a36", notes: ["Offerings remain."]
+  })).then((response) => response.json());
+  assert.equal((await fetch(`${base}/api/maps/${created.id}/hex/template`, jsonRequest(gmCookie, "POST", {
+    col: 1, row: 1, templateId: template.id
+  }))).status, 200);
+  assert.equal((await fetch(`${base}/api/maps/${created.id}/hexes`, jsonRequest(gmCookie, "PUT", { hexes: [
+    { col: 0, row: 0, isFog: true }, { col: 1, row: 0, isFog: true }
+  ] }))).status, 200);
+  const impact = await fetch(`${base}/api/maps/${created.id}/resize-impact`, jsonRequest(gmCookie, "POST", {
+    mapWidth: 320, mapHeight: 240, hexSize: 240, offsetX: 0, offsetY: 0
+  })).then((response) => response.json());
+  assert.ok(impact.total >= 3);
 
   const uploaded = await fetch(`${base}/api/maps/images`, jsonRequest(gmCookie, "POST", {
     folder: "World Maps", name: "uploaded.png", data: png.toString("base64")

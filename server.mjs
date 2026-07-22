@@ -244,6 +244,10 @@ const server = http.createServer(async (req, res) => {
     const user = url.pathname.startsWith("/api/") || url.pathname.startsWith("/content/") ? requireUser(req) : null;
     if (url.pathname === "/api/maps" && req.method === "GET") return json(res, maps.listMaps(user.isAdmin));
     if (url.pathname === "/api/maps" && req.method === "POST") { requireAdmin(user); return json(res, maps.createMap(await bodyJson(req), user.id), 201); }
+    if (url.pathname === "/api/maps/templates" && req.method === "GET") { requireAdmin(user); return json(res, maps.listTemplates()); }
+    if (url.pathname === "/api/maps/templates" && req.method === "POST") { requireAdmin(user); return json(res, maps.createTemplate(await bodyJson(req), user.id), 201); }
+    const mapTemplateRoute = url.pathname.match(/^\/api\/maps\/templates\/(\d+)$/);
+    if (mapTemplateRoute && req.method === "DELETE") { requireAdmin(user); maps.deleteTemplate(mapTemplateRoute[1]); return json(res, { ok: true }); }
     if (url.pathname === "/api/maps/images" && req.method === "GET") {
       requireAdmin(user); const index = await buildIndex(true);
       return json(res, index.files.filter((file) => file.type === "image"));
@@ -262,6 +266,14 @@ const server = http.createServer(async (req, res) => {
     const mapHexRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/hex$/);
     if (mapHexRoute && req.method === "PUT") {
       requireAdmin(user); maps.setHex(mapHexRoute[1], await bodyJson(req)); return json(res, { ok: true });
+    }
+    const mapHexesRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/hexes$/);
+    if (mapHexesRoute && req.method === "PUT") {
+      requireAdmin(user); const input = await bodyJson(req); maps.setHexes(mapHexesRoute[1], input.hexes); return json(res, { ok: true });
+    }
+    const mapApplyTemplateRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/hex\/template$/);
+    if (mapApplyTemplateRoute && req.method === "POST") {
+      requireAdmin(user); maps.applyTemplate(mapApplyTemplateRoute[1], await bodyJson(req), user.id); return json(res, { ok: true });
     }
     const mapFogRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/fog$/);
     if (mapFogRoute && req.method === "PUT") {
@@ -289,6 +301,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (mapTokenRoute && req.method === "DELETE") {
       requireAdmin(user); maps.deleteToken(mapTokenRoute[1], mapTokenRoute[2]); return json(res, { ok: true });
+    }
+    const mapResizeRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/resize-impact$/);
+    if (mapResizeRoute && req.method === "POST") {
+      requireAdmin(user); return json(res, maps.resizeImpact(mapResizeRoute[1], await bodyJson(req)));
     }
     const mapRoute = url.pathname.match(/^\/api\/maps\/(\d+)$/);
     if (mapRoute && req.method === "GET") return json(res, requireMapAccess(user, mapRoute[1]));
