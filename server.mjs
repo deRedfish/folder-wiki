@@ -295,4 +295,23 @@ export async function startServer() {
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) startServer().catch((error) => { console.error(`Could not start Folder Wiki: ${error.message}`); process.exitCode = 1; });
+if (isMain) {
+  let stopping = false;
+  const stop = (signal) => {
+    if (stopping) return;
+    stopping = true;
+    console.log(`${signal} received; closing Folder Wiki`);
+    server.close(() => {
+      auth?.close();
+      process.exit(0);
+    });
+    setTimeout(() => {
+      console.error("Folder Wiki did not close within 10 seconds; forcing shutdown");
+      server.closeAllConnections();
+      process.exit(1);
+    }, 10_000).unref();
+  };
+  process.on("SIGINT", () => stop("SIGINT"));
+  process.on("SIGTERM", () => stop("SIGTERM"));
+  startServer().catch((error) => { console.error(`Could not start Folder Wiki: ${error.message}`); process.exitCode = 1; });
+}
