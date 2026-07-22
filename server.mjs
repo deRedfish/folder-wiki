@@ -262,6 +262,10 @@ const server = http.createServer(async (req, res) => {
     if (mapHexRoute && req.method === "PUT") {
       requireAdmin(user); maps.setHex(mapHexRoute[1], await bodyJson(req)); return json(res, { ok: true });
     }
+    const mapFogRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/fog$/);
+    if (mapFogRoute && req.method === "PUT") {
+      requireAdmin(user); const input = await bodyJson(req); maps.setAllFog(mapFogRoute[1], Boolean(input.isFog)); return json(res, { ok: true });
+    }
     const mapNotesRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/notes$/);
     if (mapNotesRoute && req.method === "POST") {
       requireMapAccess(user, mapNotesRoute[1]); return json(res, maps.addNote(mapNotesRoute[1], await bodyJson(req), user.id), 201);

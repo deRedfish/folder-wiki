@@ -19,6 +19,12 @@ function text(value, label, max, required = false) {
   if (parsed.length > max) throw new Error(`${label} must be ${max} characters or fewer`);
   return parsed;
 }
+function color(value, label, fallback = null) {
+  const parsed = text(value, label, 24);
+  if (!parsed) return fallback;
+  if (!/^#[0-9a-f]{6}$/i.test(parsed)) throw new Error(`${label} must be a six-digit hex color`);
+  return parsed.toLowerCase();
+}
 function mapRecord(row) {
   return {
     id: row.id, name: row.name, imagePath: row.imagePath || null,
@@ -202,12 +208,25 @@ export class MapStore {
     const { map, col, row } = this.cell(mapId, input.col, input.row);
     const featureIcon = text(input.featureIcon, "Feature icon", 16) || null;
     const featureLabel = text(input.featureLabel, "Feature label", 80) || null;
-    const featureColor = text(input.featureColor, "Feature color", 24) || null;
+    const featureColor = color(input.featureColor, "Feature color");
     this.db.prepare(`INSERT INTO map_hexes (map_id, column_index, row_index, is_fog, feature_icon, feature_label, feature_color)
       VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(map_id, column_index, row_index) DO UPDATE SET
       is_fog = excluded.is_fog, feature_icon = excluded.feature_icon, feature_label = excluded.feature_label, feature_color = excluded.feature_color`)
       .run(map.id, col, row, input.isFog ? 1 : 0, featureIcon, featureLabel, featureColor);
     this.touch(map.id);
+  }
+
+  setAllFog(mapId, isFog) {
+    const map = this.requireMap(mapId);
+    this.transaction(() => {
+      if (!isFog) this.db.prepare("UPDATE map_hexes SET is_fog = 0 WHERE map_id = ?").run(map.id);
+      else {
+        const setFog = this.db.prepare(`INSERT INTO map_hexes (map_id, column_index, row_index, is_fog)
+          VALUES (?, ?, ?, 1) ON CONFLICT(map_id, column_index, row_index) DO UPDATE SET is_fog = 1`);
+        for (let row = 0; row < map.rows; row++) for (let col = 0; col < map.columns; col++) setFog.run(map.id, col, row);
+      }
+      this.touch(map.id);
+    });
   }
 
   addNote(mapId, input, userId) {
@@ -243,11 +262,11 @@ export class MapStore {
     const { map, col, row } = this.cell(mapId, input.col, input.row);
     const label = text(input.label, "Token label", 80, true);
     const icon = text(input.icon, "Token icon", 16) || "●";
-    const color = text(input.color, "Token color", 24) || "#8b3f35";
+    const colorValue = color(input.color, "Token color", "#8b3f35");
     const created = now();
     const result = this.db.prepare(`INSERT INTO map_tokens
       (map_id, label, icon, color, column_index, row_index, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(map.id, label, icon, color, col, row, Number(userId), created, created);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(map.id, label, icon, colorValue, col, row, Number(userId), created, created);
     this.touch(map.id);
     return this.db.prepare(`SELECT id, label, icon, color, column_index AS col, row_index AS row,
       created_at AS createdAt, updated_at AS updatedAt FROM map_tokens WHERE id = ?`).get(result.lastInsertRowid);
@@ -261,9 +280,9 @@ export class MapStore {
     const row = input.row === undefined ? token.row_index : integer(input.row, "Hex row", 0, map.rows - 1);
     const label = input.label === undefined ? token.label : text(input.label, "Token label", 80, true);
     const icon = input.icon === undefined ? token.icon : (text(input.icon, "Token icon", 16) || "●");
-    const color = input.color === undefined ? token.color : (text(input.color, "Token color", 24) || "#8b3f35");
+    const colorValue = input.color === undefined ? token.color : color(input.color, "Token color", "#8b3f35");
     this.db.prepare(`UPDATE map_tokens SET label = ?, icon = ?, color = ?, column_index = ?, row_index = ?, updated_at = ? WHERE id = ?`)
-      .run(label, icon, color, col, row, now(), token.id);
+      .run(label, icon, colorValue, col, row, now(), token.id);
     this.touch(map.id);
   }
 

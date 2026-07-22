@@ -31,6 +31,7 @@ test("maps persist configuration and expose only the active map to viewers", asy
   const visibleNote = maps.addNote(second.id, { col: 1, row: 1, body: "Old bridge." }, player.id);
   const hiddenToken = maps.createToken(second.id, { col: 2, row: 3, label: "Dragon", icon: "◆", color: "#8b3f35" }, gm.id);
   maps.createToken(second.id, { col: 1, row: 1, label: "Party", icon: "●", color: "#386b57" }, gm.id);
+  assert.throws(() => maps.createToken(second.id, { col: 1, row: 1, label: "Unsafe", color: "red; display:none" }, gm.id), /hex color/);
 
   const gmMap = maps.getMap(second.id, true);
   assert.equal(gmMap.hexes[0].featureLabel, "Sleeping wyrm");
@@ -52,4 +53,8 @@ test("maps persist configuration and expose only the active map to viewers", asy
   assert.equal(resized.hexes.length, 0);
   assert.equal(resized.tokens.length, 1);
   assert.equal(resized.notes.length, 1);
+  maps.setAllFog(second.id, true);
+  assert.equal(maps.getMap(second.id, true).hexes.filter((hex) => hex.isFog).length, 4);
+  maps.setAllFog(second.id, false);
+  assert.equal(maps.getMap(second.id, true).hexes.some((hex) => hex.isFog), false);
 });

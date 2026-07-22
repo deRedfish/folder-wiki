@@ -52,6 +52,8 @@ test("map APIs enforce GM editing and redact fogged content from players", async
   assert.equal(playerMap.hexes[0].featureLabel, null);
   assert.deepEqual(playerMap.notes, []);
   assert.deepEqual(playerMap.tokens, []);
+  assert.equal((await fetch(`${base}/api/maps/${created.id}/fog`, jsonRequest(playerCookie, "PUT", { isFog: false }))).status, 403);
+  assert.equal((await fetch(`${base}/api/maps/${created.id}/fog`, jsonRequest(gmCookie, "PUT", { isFog: false }))).status, 200);
 
   const uploaded = await fetch(`${base}/api/maps/images`, jsonRequest(gmCookie, "POST", {
     folder: "World Maps", name: "uploaded.png", data: png.toString("base64")

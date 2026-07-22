@@ -1,6 +1,7 @@
 import { prettifyMarkdown } from "./editor-utils.mjs";
 import { filesInFolder, folderSelectionStatus, foldersInFolder, folderVisibilityStatus } from "./admin-utils.mjs";
 import { articleHash, parseRouteHash } from "./route-utils.mjs";
+import { WorldMapView } from "./map-view.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -51,7 +52,7 @@ async function submitAuth() {
   catch (error) { const node = $("#auth-error"); node.textContent = error.message; node.classList.remove("hidden"); }
 }
 function setChrome(label, editable = false) {
-  view.classList.remove("editor-view");
+  view.classList.remove("editor-view", "map-view");
   $("#breadcrumbs").textContent = `Wiki / ${label}`;
   $("#edit-button").classList.toggle("hidden", !editable);
   $$(".primary-nav button").forEach((button) => button.classList.remove("active"));
@@ -347,6 +348,13 @@ function renderGM() {
   view.innerHTML = `<div class="document-header"><div class="eyebrow">At-the-table utilities</div><h1>GM screen</h1><div class="document-meta">Initiative and notes are saved in this browser.</div></div><div class="gm-grid"><section class="tool-card"><div class="section-head"><h2>Initiative tracker</h2><button data-action="add-initiative">＋ Add combatant</button></div><div id="initiative-list"></div></section><div><section class="tool-card"><h2>Dice roller</h2><div class="dice-buttons">${[4,6,8,10,12,20,100].map((die) => `<button data-die="${die}">d${die}</button>`).join("")}</div><div class="dice-result" id="dice-result">—</div></section><section class="tool-card" style="margin-top:16px"><h2>Session scratchpad</h2><textarea class="quick-notes" id="quick-notes" placeholder="Names, HP, secrets, reminders…"></textarea></section></div></div>`;
   renderInitiative(); $("#quick-notes").value = localStorage.getItem(STORAGE.notes) || ""; $("#quick-notes").addEventListener("input", (e) => localStorage.setItem(STORAGE.notes, e.target.value));
 }
+let worldMapView;
+async function renderWorldMap() {
+  setChrome("World map"); $(".primary-nav [data-action=map]").classList.add("active");
+  view.classList.add("map-view");
+  worldMapView ||= new WorldMapView({ root: view, api, toast, user: () => state.user });
+  await worldMapView.mount();
+}
 function initiatives() { return JSON.parse(localStorage.getItem(STORAGE.initiative) || "[]"); }
 function renderInitiative() { const list = initiatives().sort((a,b) => Number(b.score)-Number(a.score)); $("#initiative-list").innerHTML = list.map((item, index) => `<div class="initiative-row"><input data-init-name="${index}" value="${esc(item.name)}" placeholder="Combatant"><input type="number" data-init-score="${index}" value="${esc(item.score)}" placeholder="Init"><button data-init-remove="${index}">×</button></div>`).join("") || `<div class="empty-state" style="padding:35px 10px">Add combatants when the encounter begins.</div>`; }
 function updateInitiative() { const list = initiatives(); $$("[data-init-name]").forEach((input) => list[input.dataset.initName].name = input.value); $$("[data-init-score]").forEach((input) => list[input.dataset.initScore].score = input.value); localStorage.setItem(STORAGE.initiative, JSON.stringify(list)); }
@@ -511,6 +519,7 @@ async function route() {
   if (routeName === "file") { const file = state.files.find((item) => item.path === decodeURIComponent(encoded || "")); return file ? openArticle(file.folder) : renderNotFound(); }
   if (routeName === "all") return renderList("All articles", state.articles);
   if (routeName === "pinned") { const pins = pinned(); return renderList("Pinned articles", state.articles.filter((article) => pins.includes(article.path)), "A short shelf of references you want close at hand."); }
+  if (routeName === "map") return renderWorldMap();
   if (routeName === "gm") return renderGM();
   if (routeName === "admin") return renderAdmin();
   if (routeName === "users") return renderUserManagement();
@@ -549,7 +558,7 @@ document.addEventListener("click", async (event) => {
   const remove = event.target.closest("[data-init-remove]"); if (remove) { const list = initiatives(); list.splice(Number(remove.dataset.initRemove), 1); localStorage.setItem(STORAGE.initiative, JSON.stringify(list)); return renderInitiative(); }
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
-  if (["home","all","pinned","gm","admin","users","new"].includes(action)) return navigate(`#${action}`);
+  if (["home","all","pinned","map","gm","admin","users","new"].includes(action)) return navigate(`#${action}`);
   if (action === "search") return openSearch();
   if (action === "menu") return $("#sidebar").classList.toggle("open");
   if (action === "collapse") return $$(".tree-folder").forEach((node) => node.classList.add("closed"));
