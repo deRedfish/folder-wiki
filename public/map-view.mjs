@@ -14,7 +14,7 @@ export class WorldMapView {
   constructor({ root, api, toast, user }) {
     this.root = root; this.api = api; this.toast = toast; this.getUser = user;
     this.maps = []; this.images = []; this.templates = []; this.map = null; this.persistedMap = null; this.selected = null;
-    this.zoom = .8; this.drag = null; this.paintStroke = null; this.paintMode = "inspect"; this.suppressClickUntil = 0;
+    this.zoom = .8; this.renderedZoom = .8; this.drag = null; this.pan = null; this.paintStroke = null; this.paintMode = "inspect"; this.suppressClickUntil = 0;
     this.brush = { featureIcon: "🏰", featureLabel: "Fortress", featureColor: "#a56a36" };
     this.selectedTemplateId = null; this.hexSaveTimer = null; this.stageFrame = null;
     root.addEventListener("click", (event) => this.click(event));
@@ -62,18 +62,19 @@ export class WorldMapView {
     const settingsOpen = Boolean(this.root.querySelector(".map-settings")?.open); const admin = this.getUser().isAdmin; const map = this.map;
     if (!admin) {
       const showInspector = this.selected && !this.selectedHex()?.isFog;
-      this.root.innerHTML = `<header class="player-map-title"><h1>${esc(map.name)}</h1></header>
+      this.root.innerHTML = `<header class="player-map-title"><h1>${esc(map.name)}</h1><div class="player-map-controls">${this.zoomControlHtml("Zoom")}<span>Drag the map to move</span></div></header>
         <div class="world-map-layout player-only ${showInspector ? "has-selection" : ""}">${this.viewportHtml()}${showInspector ? `<aside class="map-inspector">${this.inspectorHtml()}</aside>` : ""}</div>`;
     } else {
       const switcher = `<label class="map-switcher-label">Map <select id="map-switcher">${this.maps.map((item) => option(item.id, item.name + (item.isActive ? " · Active" : ""), map.id)).join("")}</select></label>`;
       const active = map.isActive ? '<span class="map-active-badge">Visible to players</span>' : '<button class="button" data-map-action="activate">Make active</button>';
       this.root.innerHTML = `<div class="document-header map-header"><div><div class="eyebrow">Exploration · Persistent world map</div><h1>${esc(map.name)}</h1>
         <div class="document-meta"><span id="map-grid-summary">${map.columns} × ${map.rows} automatic grid</span><span>${map.tokens.length} tokens</span><span>${map.notes.length} notes</span></div></div></div>
-        <div class="map-toolbar">${switcher}<label class="map-zoom">View zoom <input id="map-zoom" type="range" min="35" max="160" value="${Math.round(this.zoom * 100)}"><output id="map-zoom-output">${Math.round(this.zoom * 100)}%</output></label>
+        <div class="map-toolbar">${switcher}${this.zoomControlHtml("View zoom")}
         <button class="button ghost" data-map-action="create">＋ New map</button>${active}<button class="danger-button" data-map-action="delete-map">Delete map</button></div>
         ${this.settingsHtml()}${this.paintToolbarHtml()}<div class="world-map-layout">${this.viewportHtml()}<aside class="map-inspector">${this.inspectorHtml()}</aside></div>`;
     }
     const nextViewport = this.root.querySelector(".map-viewport"); if (nextViewport) { nextViewport.scrollLeft = scroll.left; nextViewport.scrollTop = scroll.top; }
+    this.renderedZoom = this.zoom;
     const settings = this.root.querySelector(".map-settings"); if (settings) settings.open = settingsOpen;
   }
 
@@ -83,17 +84,24 @@ export class WorldMapView {
 
   surfaceHtml() {
     const admin = this.getUser().isAdmin;
-    return `<div class="map-surface ${admin ? "gm-map paint-" + this.paintMode : "player-map"}" style="width:${this.map.mapWidth}px;height:${this.map.mapHeight}px;transform:scale(${this.zoom})">
+    return `<div class="map-surface ${admin ? "gm-map paint-" + this.paintMode : "player-map paint-inspect"}" style="width:${this.map.mapWidth}px;height:${this.map.mapHeight}px;transform:scale(${this.zoom})">
       ${this.map.imagePath ? `<img class="map-background" src="/api/maps/${this.map.id}/image?v=${encodeURIComponent(this.map.updatedAt)}" alt="">` : '<div class="map-background-placeholder"><span>Map image not set</span></div>'}${this.gridHtml()}</div>`;
   }
 
-  renderStage() {
+  zoomControlHtml(label) {
+    const percent = Math.round(this.zoom * 100);
+    return `<label class="map-zoom">${label}<input id="map-zoom" type="range" min="35" max="160" value="${percent}" aria-label="Map zoom"><output id="map-zoom-output">${percent}%</output></label>`;
+  }
+
+  renderStage(focus = null) {
     cancelAnimationFrame(this.stageFrame);
     this.stageFrame = requestAnimationFrame(() => {
       const viewport = this.root.querySelector(".map-viewport"); if (!viewport) return;
       const scroll = { left: viewport.scrollLeft, top: viewport.scrollTop }; const spacer = viewport.querySelector(".map-stage-spacer");
       spacer.style.width = this.map.mapWidth * this.zoom + "px"; spacer.style.height = this.map.mapHeight * this.zoom + "px"; spacer.innerHTML = this.surfaceHtml();
-      viewport.scrollLeft = scroll.left; viewport.scrollTop = scroll.top;
+      viewport.scrollLeft = focus ? focus.x * this.zoom - viewport.clientWidth / 2 : scroll.left;
+      viewport.scrollTop = focus ? focus.y * this.zoom - viewport.clientHeight / 2 : scroll.top;
+      this.renderedZoom = this.zoom;
     });
   }
 
@@ -140,8 +148,14 @@ export class WorldMapView {
       return `<g class="map-token ${admin ? "is-draggable" : ""}" data-map-token="${token.id}" transform="translate(${center.x + offset} ${center.y})"><circle r="17" style="fill:${esc(token.color)}"></circle>
         <text class="map-token-icon" y="6">${esc(token.icon)}</text><text class="map-token-label" y="31">${esc(token.label)}</text><title>${esc(token.label)}</title></g>`;
     }).join("");
-    return `<svg class="map-grid" viewBox="0 0 ${this.map.mapWidth} ${this.map.mapHeight}" width="${this.map.mapWidth}" height="${this.map.mapHeight}"><defs><pattern id="map-fog-clouds" width="54" height="36" patternUnits="userSpaceOnUse">
-      <rect width="54" height="36" fill="#777b78"/><circle cx="12" cy="20" r="13" fill="#aeb2ad"/><circle cx="29" cy="14" r="16" fill="#969b97"/><circle cx="46" cy="23" r="14" fill="#b8bbb6"/></pattern></defs>
+    return `<svg class="map-grid" viewBox="0 0 ${this.map.mapWidth} ${this.map.mapHeight}" width="${this.map.mapWidth}" height="${this.map.mapHeight}"><defs>
+      <filter id="map-fog-soften" x="-30%" y="-45%" width="160%" height="190%"><feGaussianBlur stdDeviation="10"/></filter>
+      <pattern id="map-fog-clouds" width="180" height="112" patternUnits="userSpaceOnUse">
+        <rect width="180" height="112" fill="#858c88"/><g filter="url(#map-fog-soften)" opacity=".82">
+          <ellipse cx="20" cy="28" rx="55" ry="25" fill="#b8bfbb"/><ellipse cx="94" cy="18" rx="61" ry="31" fill="#6f7773"/>
+          <ellipse cx="164" cy="53" rx="58" ry="29" fill="#adb4b0"/><ellipse cx="66" cy="83" rx="72" ry="31" fill="#929a96"/>
+          <ellipse cx="145" cy="108" rx="64" ry="29" fill="#c0c5c2"/>
+        </g></pattern></defs>
       <g class="map-hex-layer">${cells.join("")}</g><g class="map-token-layer">${tokens}</g></svg>`;
   }
 
@@ -237,7 +251,11 @@ export class WorldMapView {
 
   input(event) {
     if (event.target.matches("#map-zoom")) {
-      this.zoom = Number(event.target.value) / 100; this.root.querySelector("#map-zoom-output").textContent = event.target.value + "%"; return this.renderStage();
+      const viewport = this.root.querySelector(".map-viewport"); const focus = viewport ? {
+        x: (viewport.scrollLeft + viewport.clientWidth / 2) / this.renderedZoom,
+        y: (viewport.scrollTop + viewport.clientHeight / 2) / this.renderedZoom
+      } : null;
+      this.zoom = Number(event.target.value) / 100; this.root.querySelector("#map-zoom-output").textContent = event.target.value + "%"; return this.renderStage(focus);
     }
     if (event.target.matches("[data-map-setting]")) {
       const key = event.target.dataset.mapSetting; if (!["mapWidth","mapHeight","hexSize","offsetX","offsetY"].includes(key)) return;
@@ -352,20 +370,38 @@ export class WorldMapView {
       event.preventDefault(); const token = this.map.tokens.find((item) => item.id === Number(tokenNode.dataset.mapToken)); if (token) this.drag = { node: tokenNode, token, startX: event.clientX, startY: event.clientY, moved: false }; return;
     }
     const cell = event.target.closest("[data-map-hex]");
-    if (cell && this.getUser().isAdmin && this.paintMode !== "inspect") { event.preventDefault(); this.paintStroke = new Map(); this.paintCell(cell); }
+    if (cell && this.getUser().isAdmin && this.paintMode !== "inspect") { event.preventDefault(); this.paintStroke = new Map(); this.paintCell(cell); return; }
+    const surface = event.target.closest(".map-surface");
+    if (surface && this.paintMode === "inspect" && event.isPrimary && event.button === 0) {
+      const viewport = surface.closest(".map-viewport"); this.pan = {
+        surface, viewport, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+        scrollLeft: viewport.scrollLeft, scrollTop: viewport.scrollTop, moved: false
+      };
+    }
   }
 
   pointerMove(event) {
     if (this.paintStroke) { const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-map-hex]"); if (cell && this.root.contains(cell)) this.paintCell(cell); return; }
-    if (!this.drag) return; const rect = this.root.querySelector(".map-grid")?.getBoundingClientRect(); if (!rect) return;
-    const x = (event.clientX - rect.left) / rect.width * this.map.mapWidth; const y = (event.clientY - rect.top) / rect.height * this.map.mapHeight;
-    if (Math.hypot(event.clientX - this.drag.startX, event.clientY - this.drag.startY) > 4) this.drag.moved = true; this.drag.node.setAttribute("transform", `translate(${x} ${y})`);
+    if (this.drag) {
+      const rect = this.root.querySelector(".map-grid")?.getBoundingClientRect(); if (!rect) return;
+      const x = (event.clientX - rect.left) / rect.width * this.map.mapWidth; const y = (event.clientY - rect.top) / rect.height * this.map.mapHeight;
+      if (Math.hypot(event.clientX - this.drag.startX, event.clientY - this.drag.startY) > 4) this.drag.moved = true; this.drag.node.setAttribute("transform", `translate(${x} ${y})`); return;
+    }
+    if (this.pan && this.pan.pointerId === event.pointerId) {
+      const dx = event.clientX - this.pan.startX; const dy = event.clientY - this.pan.startY;
+      if (!this.pan.moved && Math.hypot(dx, dy) > 4) { this.pan.moved = true; this.pan.surface.classList.add("is-panning"); }
+      if (this.pan.moved) { event.preventDefault(); this.pan.viewport.scrollLeft = this.pan.scrollLeft - dx; this.pan.viewport.scrollTop = this.pan.scrollTop - dy; }
+    }
   }
 
   pointerUp(event) {
     if (this.paintStroke) {
       const stroke = [...this.paintStroke.values()]; this.paintStroke = null; this.suppressClickUntil = Date.now() + 250;
       return this.savePaintStroke(stroke);
+    }
+    if (this.pan && this.pan.pointerId === event.pointerId) {
+      const moved = this.pan.moved; this.pan.surface.classList.remove("is-panning"); this.pan = null;
+      if (moved) this.suppressClickUntil = Date.now() + 250; return;
     }
     if (!this.drag) return; const drag = this.drag; this.drag = null; if (!drag.moved) return; this.suppressClickUntil = Date.now() + 250;
     const rect = this.root.querySelector(".map-grid")?.getBoundingClientRect(); if (!rect) return this.render();
@@ -378,5 +414,8 @@ export class WorldMapView {
     if (!saved) { this.map = clone(this.persistedMap); this.render(); }
   }
 
-  cancelPointer() { if (this.paintStroke || this.drag) { this.paintStroke = null; this.drag = null; this.map = clone(this.persistedMap); this.render(); } }
+  cancelPointer() {
+    if (this.pan) { this.pan.surface.classList.remove("is-panning"); this.pan = null; }
+    if (this.paintStroke || this.drag) { this.paintStroke = null; this.drag = null; this.map = clone(this.persistedMap); this.render(); }
+  }
 }
