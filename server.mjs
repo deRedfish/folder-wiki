@@ -208,6 +208,7 @@ async function uploadMapImage(input) {
   const suppliedName = String(input.name || "").trim().replaceAll("\\", "/");
   const name = path.posix.basename(suppliedName);
   if (!folder || folder === "." || !name || name !== suppliedName) throw new Error("Choose a content folder and a file name");
+  if ([...folder.split("/"), name].some((part) => part.startsWith("."))) throw new Error("Map images cannot use hidden folders or file names");
   if (!IMAGE_TYPES.has(path.extname(name).toLowerCase())) throw new Error("Upload a PNG, JPG, WEBP, GIF, AVIF, or SVG image");
   const encoded = String(input.data || "").replace(/^data:[^;]+;base64,/, "").replace(/\s+/g, "");
   if (!encoded || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new Error("Image data is invalid");

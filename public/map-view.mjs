@@ -53,6 +53,9 @@ export class WorldMapView {
   tokensAt(col, row) { return this.map.tokens.filter((token) => token.col === col && token.row === row); }
 
   render() {
+    const priorViewport = this.root.querySelector(".map-viewport");
+    const scroll = { left: priorViewport?.scrollLeft || 0, top: priorViewport?.scrollTop || 0 };
+    const settingsOpen = Boolean(this.root.querySelector(".map-settings")?.open);
     const admin = this.getUser().isAdmin; const map = this.map; const zoomPercent = Math.round(this.zoom * 100);
     const switcher = admin
       ? `<label class="map-switcher-label">Map <select id="map-switcher">${this.maps.map((item) => option(String(item.id), item.name + (item.isActive ? " · Active" : ""), String(map.id))).join("")}</select></label>`
@@ -75,6 +78,9 @@ export class WorldMapView {
         </section>
         <aside class="map-inspector">${this.inspectorHtml()}</aside>
       </div>`;
+    const viewport = this.root.querySelector(".map-viewport");
+    if (viewport) { viewport.scrollLeft = scroll.left; viewport.scrollTop = scroll.top; }
+    const settings = this.root.querySelector(".map-settings"); if (settings) settings.open = settingsOpen;
   }
 
   settingsHtml() {
@@ -121,7 +127,9 @@ export class WorldMapView {
     }
     const tokens = this.map.tokens.map((token) => {
       const center = hexCenter(this.map, token.col, token.row);
-      return `<g class="map-token ${admin ? "is-draggable" : ""}" data-map-token="${token.id}" transform="translate(${center.x} ${center.y})">
+      const cellTokens = this.tokensAt(token.col, token.row); const index = cellTokens.findIndex((item) => item.id === token.id);
+      const offset = (index - (cellTokens.length - 1) / 2) * Math.min(24, this.map.hexSize * .55);
+      return `<g class="map-token ${admin ? "is-draggable" : ""}" data-map-token="${token.id}" transform="translate(${center.x + offset} ${center.y})">
         <circle r="17" style="fill:${esc(token.color)}"></circle><text class="map-token-icon" y="6">${esc(token.icon)}</text>
         <text class="map-token-label" y="31">${esc(token.label)}</text><title>${esc(token.label)}</title></g>`;
     }).join("");

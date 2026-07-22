@@ -60,6 +60,9 @@ test("map APIs enforce GM editing and redact fogged content from players", async
   }));
   assert.equal(uploaded.status, 201);
   assert.equal((await uploaded.json()).path, "World Maps/uploaded.png");
+  assert.equal((await fetch(`${base}/api/maps/images`, jsonRequest(gmCookie, "POST", {
+    folder: ".hidden", name: "lost.png", data: png.toString("base64")
+  }))).status, 400);
 
   const second = await fetch(`${base}/api/maps`, jsonRequest(gmCookie, "POST", { name: "Deep Roads" })).then((response) => response.json());
   assert.equal((await fetch(`${base}/api/maps/${second.id}`, withSession(playerCookie))).status, 404);
