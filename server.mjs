@@ -271,6 +271,36 @@ const server = http.createServer(async (req, res) => {
     if (mapHexesRoute && req.method === "PUT") {
       requireAdmin(user); const input = await bodyJson(req); maps.setHexes(mapHexesRoute[1], input.hexes); return json(res, { ok: true });
     }
+    const mapFeaturesRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/features$/);
+    if (mapFeaturesRoute && req.method === "POST") {
+      requireAdmin(user); return json(res, maps.createFeature(mapFeaturesRoute[1], await bodyJson(req), user.id), 201);
+    }
+    const mapFeaturePaintRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/features\/paint$/);
+    if (mapFeaturePaintRoute && req.method === "PUT") {
+      requireAdmin(user); maps.paintFeatures(mapFeaturePaintRoute[1], await bodyJson(req), user.id); return json(res, { ok: true });
+    }
+    const mapFeatureRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/features\/(\d+)$/);
+    if (mapFeatureRoute && req.method === "PUT") {
+      requireAdmin(user); maps.updateFeature(mapFeatureRoute[1], mapFeatureRoute[2], await bodyJson(req)); return json(res, { ok: true });
+    }
+    if (mapFeatureRoute && req.method === "DELETE") {
+      requireAdmin(user); maps.deleteFeature(mapFeatureRoute[1], mapFeatureRoute[2]); return json(res, { ok: true });
+    }
+    const mapZonePaintRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/zones\/paint$/);
+    if (mapZonePaintRoute && req.method === "PUT") {
+      requireAdmin(user); maps.paintZone(mapZonePaintRoute[1], await bodyJson(req)); return json(res, { ok: true });
+    }
+    const mapZonesRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/zones$/);
+    if (mapZonesRoute && req.method === "POST") {
+      requireAdmin(user); return json(res, maps.createZone(mapZonesRoute[1], await bodyJson(req), user.id), 201);
+    }
+    const mapZoneRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/zones\/(\d+)$/);
+    if (mapZoneRoute && req.method === "PUT") {
+      requireAdmin(user); maps.updateZone(mapZoneRoute[1], mapZoneRoute[2], await bodyJson(req)); return json(res, { ok: true });
+    }
+    if (mapZoneRoute && req.method === "DELETE") {
+      requireAdmin(user); maps.deleteZone(mapZoneRoute[1], mapZoneRoute[2]); return json(res, { ok: true });
+    }
     const mapApplyTemplateRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/hex\/template$/);
     if (mapApplyTemplateRoute && req.method === "POST") {
       requireAdmin(user); maps.applyTemplate(mapApplyTemplateRoute[1], await bodyJson(req), user.id); return json(res, { ok: true });
