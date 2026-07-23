@@ -71,7 +71,7 @@ export class WorldMapView {
     if (!admin) {
       const showInspector = this.selected && !this.selectedHex()?.isFog;
       this.root.innerHTML = `<header class="player-map-title"><h1>${esc(map.name)}</h1><div class="player-map-controls">${this.zoomControlHtml("Zoom")}<span>Drag the map to move</span></div></header>
-        <div class="world-map-layout player-only ${showInspector ? "has-selection" : ""}>${this.viewportHtml()}${showInspector ? `<aside class="map-inspector">${this.inspectorHtml()}</aside>` : ""}</div>`;
+        <div class="world-map-layout player-only ${showInspector ? "has-selection" : ""}">${this.viewportHtml()}${showInspector ? `<aside class="map-inspector">${this.inspectorHtml()}</aside>` : ""}</div>`;
     } else {
       const switcher = `<label class="map-switcher-label">Map <select id="map-switcher">${this.maps.map((item) => option(item.id, item.name + (item.isActive ? " · Active" : ""), map.id)).join("")}</select></label>`;
       const active = map.isActive ? '<span class="map-active-badge">Visible to players</span>' : '<button class="button" data-map-action="activate">Make active</button>';
@@ -532,6 +532,7 @@ export class WorldMapView {
         surface, viewport, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
         scrollLeft: viewport.scrollLeft, scrollTop: viewport.scrollTop, moved: false
       };
+      try { surface.setPointerCapture(event.pointerId); } catch {}
     }
   }
 
@@ -558,7 +559,8 @@ export class WorldMapView {
       const stroke = [...this.paintStroke.values()]; this.paintStroke = null; this.suppressClickUntil = Date.now() + 250; return this.savePaintStroke(stroke);
     }
     if (this.pan && this.pan.pointerId === event.pointerId) {
-      const moved = this.pan.moved; this.pan.surface.classList.remove("is-panning"); this.pan = null;
+      const moved = this.pan.moved; try { this.pan.surface.releasePointerCapture(event.pointerId); } catch {}
+      this.pan.surface.classList.remove("is-panning"); this.pan = null;
       if (moved) this.suppressClickUntil = Date.now() + 250; return;
     }
     if (!this.drag) return; const drag = this.drag; this.drag = null; if (!drag.moved) return; this.suppressClickUntil = Date.now() + 250;
@@ -586,7 +588,7 @@ export class WorldMapView {
   }
 
   cancelPointer() {
-    if (this.pan) { this.pan.surface.classList.remove("is-panning"); this.pan = null; }
+    if (this.pan) { try { this.pan.surface.releasePointerCapture(this.pan.pointerId); } catch {} this.pan.surface.classList.remove("is-panning"); this.pan = null; }
     if (this.paintStroke || this.drag) { this.paintStroke = null; this.drag = null; this.map = clone(this.persistedMap); this.render(); }
   }
 }
