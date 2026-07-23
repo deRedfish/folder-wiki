@@ -532,7 +532,6 @@ export class WorldMapView {
         surface, viewport, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
         scrollLeft: viewport.scrollLeft, scrollTop: viewport.scrollTop, moved: false
       };
-      try { surface.setPointerCapture(event.pointerId); } catch {}
     }
   }
 
@@ -549,7 +548,10 @@ export class WorldMapView {
     }
     if (this.pan && this.pan.pointerId === event.pointerId) {
       const dx = event.clientX - this.pan.startX; const dy = event.clientY - this.pan.startY;
-      if (!this.pan.moved && Math.hypot(dx, dy) > 4) { this.pan.moved = true; this.pan.surface.classList.add("is-panning"); }
+      if (!this.pan.moved && Math.hypot(dx, dy) > 4) {
+        this.pan.moved = true; this.pan.surface.classList.add("is-panning");
+        try { this.pan.surface.setPointerCapture(event.pointerId); } catch {}
+      }
       if (this.pan.moved) { event.preventDefault(); this.pan.viewport.scrollLeft = this.pan.scrollLeft - dx; this.pan.viewport.scrollTop = this.pan.scrollTop - dy; }
     }
   }
