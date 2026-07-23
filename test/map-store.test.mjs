@@ -148,7 +148,7 @@ test("existing single-feature maps and templates migrate without losing content"
   legacy.prepare("INSERT INTO map_hex_templates VALUES (1, 'Old shrine', '⛩', 'Ancient shrine', '#a56a36', '[\"Offerings\"]', ?, ?, ?)").run(gm.id, created, created);
   legacy.close();
 
-  const maps = new MapStore(database); context.after(async () => { maps.close(); await rm(directory, { recursive: true, force: true }); });
+  let maps = new MapStore(database); context.after(async () => { maps.close(); await rm(directory, { recursive: true, force: true }); });
   const migrated = maps.getMap(1, true);
   assert.deepEqual(migrated.features.map(({ name, icon, description, isDisplayed, isVisible }) => ({
     name, icon, description, isDisplayed, isVisible
@@ -157,4 +157,6 @@ test("existing single-feature maps and templates migrate without losing content"
   assert.deepEqual(maps.listTemplates()[0].features, [{
     name: "Ancient shrine", icon: "⛩", description: "", isDisplayed: true, isVisible: true
   }]);
+  maps.deleteFeature(1, migrated.features[0].id); maps.close(); maps = new MapStore(database);
+  assert.deepEqual(maps.getMap(1, true).features, []);
 });

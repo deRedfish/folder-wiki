@@ -170,19 +170,23 @@ Users, roles, sessions, and role visibility grants are stored in `.folder-wiki/w
 
 Every logged-in user can open **World map**. Players see only the map currently made active by an administrator. Administrators can create any number of maps, switch between them, and choose which single map is active for players.
 
-Open **Map and grid settings** to choose any image already stored in the wiki or upload a new image to a chosen folder under `content/`. Sliders adjust the map width, map height, hex size, and horizontal or vertical grid alignment with an immediate preview; releasing a slider persists the change. The grid automatically adds or removes rows and columns to cover the available map. Before an adjustment removes out-of-bounds features, notes, or tokens, the wiki identifies the affected content and asks for confirmation. Fog-only cells need no confirmation.
+Open **Map and grid settings** to choose any image already stored in the wiki or upload a new image to a chosen folder under `content/`. Sliders adjust the map width, map height, hex size, and horizontal or vertical grid alignment with an immediate preview; releasing a slider persists the change. The grid automatically adds or removes rows and columns to cover the available map. Before an adjustment removes out-of-bounds features, zone assignments, notes, or tokens, the wiki identifies the affected content and asks for confirmation. Fog-only cells need no confirmation.
 
 Select a hex to open its inspector. Administrators can:
 
-- paint fog, reveal terrain, place features, or erase features across several hexes by clicking and dragging;
-- assign fantasy feature icons, labels, and colors, with changes saved automatically;
-- save a hex's feature and notes as a reusable template, then apply that template from the hex inspector;
-- add labelled, colored tokens and drag them between hexes;
+- paint fog, reveal terrain, place features, paint zones, or clear zones across several hexes by clicking and dragging;
+- create named and described zones with translucent colors, then reuse them across any number of hexes;
+- add multiple named, illustrated, and described features to a hex and choose which one supplies its map icon and fantasy-styled label;
+- save a hex's features and notes as a reusable template, then apply that template from the hex inspector without replacing its fog or zone;
+- add compact labelled, colored tokens and drag them between hexes;
+- independently decide whether each feature, zone, and token is visible to players;
 - edit or remove any shared note.
 
-All users can add notes to revealed hexes and edit or remove their own notes. Hexes with visible notes receive a distinct outline. Fogged hexes remain inspectable to administrators with a darkened treatment, but player API responses remove their feature data, notes, and tokens before the data reaches the browser. Players see a smooth, uniform cloudy texture instead. Both GM and player views can zoom while retaining the currently viewed area, then drag the map to pan around it. The player view otherwise contains only the active map's title and map; selecting a revealed hex opens its feature name and shared notes without exposing GM controls or map settings.
+Fog, zones, features, notes, and tokens are independent layers and can coexist on the same hex. All users can add notes to revealed hexes and edit or remove their own notes. Hexes with visible notes receive a distinct outline. In the GM view, fog darkens the background and any painted zone beneath it. Player API responses remove every feature, zone assignment, note, and token inside fog before the data reaches the browser; players see a uniform dark gray hex instead. Items marked GM-only are also removed server-side even on revealed hexes. A visible zone remains inspectable to players wherever at least one of its painted hexes is revealed.
 
-Map configuration, hex state, reusable templates, notes, tokens, and the active-map choice are stored in `.folder-wiki/wiki.db`. Uploaded backgrounds remain ordinary files in `content/`, so back up both locations.
+Both GM and player views can zoom while retaining the currently viewed area, then drag the map to pan around it. The player view otherwise contains only the active map's title and map; selecting a revealed hex opens its visible zone, feature descriptions, notes, and tokens without exposing GM controls or map settings.
+
+Map configuration, hex state, zones, features, reusable templates, notes, tokens, visibility settings, and the active-map choice are stored in `.folder-wiki/wiki.db`. Existing single-feature maps and templates are migrated automatically. Uploaded backgrounds remain ordinary files in `content/`, so back up both locations.
 
 ## Local browser data
 

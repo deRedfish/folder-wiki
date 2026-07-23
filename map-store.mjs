@@ -151,6 +151,8 @@ export class MapStore {
       WHERE (h.feature_icon IS NOT NULL OR h.feature_label IS NOT NULL)
         AND NOT EXISTS (SELECT 1 FROM map_features f WHERE f.map_id = h.map_id AND f.column_index = h.column_index AND f.row_index = h.row_index)`)
       .run(migratedAt, migratedAt);
+    this.db.prepare(`UPDATE map_hexes SET feature_icon = NULL, feature_label = NULL, feature_color = NULL
+      WHERE feature_icon IS NOT NULL OR feature_label IS NOT NULL OR feature_color IS NOT NULL`).run();
     const migrateTemplate = this.db.prepare("UPDATE map_hex_templates SET features_json = ? WHERE id = ?");
     for (const row of this.db.prepare(`SELECT id, feature_icon AS icon, feature_label AS name, features_json AS featuresJson
       FROM map_hex_templates WHERE feature_icon IS NOT NULL OR feature_label IS NOT NULL`).all()) {
