@@ -20,6 +20,7 @@ Folder Wiki works especially well as a personal encyclopedia, research archive, 
 - Account signup, secure sessions, cumulative roles, and per-role content access
 - Recently updated, pinned, filtered, and random article navigation
 - Local GM screen with initiative tracker, dice roller, and scratchpad
+- Persistent world maps with adjustable image-backed hex grids, fog of war, discoveries, notes, and movable tokens
 - Responsive layout for desktop and mobile browsers
 - Built-in SQLite persistence with no external database service or runtime package dependencies
 
@@ -165,8 +166,29 @@ Files not granted to any of a viewer's roles are removed from article pages, fol
 
 Users, roles, sessions, and role visibility grants are stored in `.folder-wiki/wiki.db`. The runtime directory is Git-ignored and should not be committed. Existing `.folder-wiki/visibility.json` choices are respected when files are first migrated into the role database.
 
-## Local browser data
+## World map editor
 
+Every logged-in user can open **World map**. Players see only the map currently made active by an administrator. Administrators can create any number of maps, switch between them, and choose which single map is active for players.
+
+Open **Map and grid settings** to choose any image already stored in the wiki or upload a new image to a chosen folder under `content/`. Sliders adjust the map width, map height, hex size, and horizontal or vertical grid alignment with an immediate preview; releasing a slider persists the change. The grid automatically adds or removes rows and columns to cover the available map. Before an adjustment removes out-of-bounds features, zone assignments, notes, or tokens, the wiki identifies the affected content and asks for confirmation. Fog-only cells need no confirmation.
+
+Select a hex to open its inspector. Administrators can:
+
+- paint fog, reveal terrain, place features, paint zones, or clear zones across several hexes by clicking and dragging;
+- create named and described zones with translucent colors, then reuse them across any number of hexes;
+- add multiple named, illustrated, and described features to a hex and choose which one supplies its map icon and fantasy-styled label;
+- save a hex's features and notes as a reusable template, then apply that template from the hex inspector without replacing its fog or zone;
+- add compact labelled, colored tokens and drag them between hexes;
+- independently decide whether each feature, zone, and token is visible to players;
+- edit or remove any shared note.
+
+Fog, zones, features, notes, and tokens are independent layers and can coexist on the same hex. All users can add notes to revealed hexes and edit or remove their own notes. Hexes with visible notes receive a distinct outline. In the GM view, fog darkens the background and any painted zone beneath it. Player API responses remove every feature, zone assignment, note, and token inside fog before the data reaches the browser; players see a uniform dark gray hex instead. Items marked GM-only are also removed server-side even on revealed hexes. A visible zone remains inspectable to players wherever at least one of its painted hexes is revealed.
+
+Both GM and player views can zoom while retaining the currently viewed area, then drag the map to pan around it. The player view otherwise contains only the active map's title and map; selecting a revealed hex opens its visible zone, feature descriptions, notes, and tokens without exposing GM controls or map settings.
+
+Map configuration, hex state, zones, features, reusable templates, notes, tokens, visibility settings, and the active-map choice are stored in `.folder-wiki/wiki.db`. Existing single-feature maps and templates are migrated automatically. Uploaded backgrounds remain ordinary files in `content/`, so back up both locations.
+
+## Local browser data
 
 Pinned articles, initiative entries, and GM scratch notes are stored in your browser's local storage. Login sessions are stored in the local SQLite database and represented in the browser by an HttpOnly cookie. None of these values are written into `content/` or synchronized between browsers.
 
