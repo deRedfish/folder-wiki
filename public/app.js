@@ -6,7 +6,7 @@ import { WorldMapView } from "./map-view.mjs";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const view = $("#view");
-const state = { user: null, authMode: "login", files: [], folderPaths: [], articles: [], current: null, currentFile: null, content: "", searchResults: [], selectedResult: 0, adminFiles: [], adminRoles: [], adminRoleId: null, adminSelection: new Set(), adminCollapsed: new Set(), adminAnchor: null };
+const state = { user: null, authMode: "login", files: [], folderPaths: [], articles: [], current: null, currentFile: null, content: "", searchResults: [], selectedResult: 0, adminFiles: [], adminRoles: [], adminRoleId: null, adminSelection: new Set(), adminCollapsed: new Set(), adminAnchor: null, treeCollapsed: new Set(), treeSeen: new Set() };
 const icons = { markdown: "▤", pdf: "▥", image: "▧", archive: "⬡" };
 const esc = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 const contentUrl = (file) => `/content/${file.split("/").map(encodeURIComponent).join("/")}`;
@@ -97,7 +97,11 @@ function buildArticles() {
 function buildTree() {
   const roots = state.articles.filter((article) => !article.parent);
   function branch(articles, depth = 0) {
-    return articles.map((article) => `<div class="tree-folder ${depth > 0 ? "closed" : ""}"><div class="tree-folder-line"><button class="tree-toggle" aria-label="Toggle child articles"><span class="chev">${article.children.length ? "▼" : "·"}</span></button><button class="tree-folder-row" data-article="${esc(article.path)}"><span>▱</span><span>${esc(article.title)}</span></button></div>${article.children.length ? `<div class="tree-children">${branch(article.children, depth + 1)}</div>` : ""}</div>`).join("");
+    return articles.map((article) => {
+      if (!state.treeSeen.has(article.path)) { state.treeSeen.add(article.path); if (depth > 0) state.treeCollapsed.add(article.path); }
+      const closed = state.treeCollapsed.has(article.path);
+      return `<div class="tree-folder ${closed ? "closed" : ""}"><div class="tree-folder-line"><button class="tree-toggle" aria-label="Toggle child articles"><span class="chev">${article.children.length ? "▼" : "·"}</span></button><button class="tree-folder-row" data-article="${esc(article.path)}"><span>▱</span><span>${esc(article.title)}</span></button></div>${article.children.length ? `<div class="tree-children">${branch(article.children, depth + 1)}</div>` : ""}</div>`;
+    }).join("");
   }
   $("#file-tree").innerHTML = branch(roots);
   $("#library-status").textContent = `${state.articles.length} articles · ${state.files.length} files`;
@@ -542,7 +546,14 @@ document.addEventListener("click", async (event) => {
   if (articleHeading) { event.preventDefault(); history.replaceState(null, "", articleHeading.getAttribute("href")); document.getElementById(articleHeading.dataset.articleHeading)?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
   const articleNode = event.target.closest("[data-article]"); if (articleNode) { closeSearch(); return navigate(`#article/${encodeURIComponent(articleNode.dataset.article)}`); }
   const imageNode = event.target.closest("[data-image]"); if (imageNode) return openImage(imageNode.dataset.image, imageNode.dataset.imageTitle);
-  const treeToggle = event.target.closest(".tree-toggle"); if (treeToggle) return treeToggle.closest(".tree-folder").classList.toggle("closed");
+  const treeToggle = event.target.closest(".tree-toggle");
+  if (treeToggle) {
+    const folderNode = treeToggle.closest(".tree-folder");
+    const closed = folderNode.classList.toggle("closed");
+    const path = $(".tree-folder-row", folderNode)?.dataset.article;
+    if (path) closed ? state.treeCollapsed.add(path) : state.treeCollapsed.delete(path);
+    return;
+  }
   if (event.target.closest(".visibility-toggle")) return;
   const adminFolderBranch = event.target.closest("[data-admin-folder-branch]");
   if (adminFolderBranch) return toggleAdminFolderBranch(adminFolderBranch.dataset.adminFolderBranch);
@@ -561,7 +572,7 @@ document.addEventListener("click", async (event) => {
   if (["home","all","pinned","map","gm","admin","users","new"].includes(action)) return navigate(`#${action}`);
   if (action === "search") return openSearch();
   if (action === "menu") return $("#sidebar").classList.toggle("open");
-  if (action === "collapse") return $$(".tree-folder").forEach((node) => node.classList.add("closed"));
+  if (action === "collapse") { state.treeSeen.forEach((path) => state.treeCollapsed.add(path)); return $$(".tree-folder").forEach((node) => node.classList.add("closed")); }
   if (action === "random") { const article = state.articles[Math.floor(Math.random() * state.articles.length)]; if (article) navigate(`#article/${encodeURIComponent(article.path)}`); }
   if (action === "edit" && state.currentFile) return renderEditor(state.currentFile);
   if (action === "cancel-edit") return state.current ? navigate(`#article/${encodeURIComponent(state.current.path)}`) : navigate("#home");
