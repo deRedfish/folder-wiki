@@ -45,6 +45,10 @@ const VARIANT_NAMES = {
 
 const byType = new Map(TERRAIN_TYPES.map((terrain) => [terrain.value, terrain]));
 const byClimate = new Map(TERRAIN_CLIMATES.map((climate) => [climate.value, climate]));
+const TERRAIN_ASSETS = {
+  water: "water", plains: "plains", hills: "hills", mountains: "mountains",
+  "dwarf-tunnels": "underground", caverns: "underground", swamps: "swamps", wasteland: "wasteland", forest: "forest"
+};
 
 export function terrainDefinition(value) { return byType.get(String(value || "")) || null; }
 export function climateDefinition(value) { return byClimate.get(String(value || "")) || null; }
@@ -57,6 +61,14 @@ export function isTerrainCombination(type, climate = "") {
 export function terrainName(type, climate = "") {
   const terrain = terrainDefinition(type); if (!terrain) return "Unpainted terrain";
   return VARIANT_NAMES[`${type}:${climate}`] || terrain.label;
+}
+
+export function terrainAsset(type, climate = "") {
+  const asset = TERRAIN_ASSETS[String(type || "")]; if (!asset) return null;
+  if (climate === "magic") return "/terrain-tiles/magic.png";
+  if (climate === "volcanic") return "/terrain-tiles/volcanic.png";
+  if (["snowy", "arid", "lush"].includes(climate)) return `/terrain-tiles/${climate}-${asset}.png`;
+  return `/terrain-tiles/base-${asset}.png`;
 }
 
 function channel(hex, offset) { return Number.parseInt(hex.slice(offset, offset + 2), 16); }

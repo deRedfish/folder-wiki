@@ -46,6 +46,21 @@ test("selected player hexes expose notes but not GM editing tools", () => {
   assert.doesNotMatch(root.innerHTML, /map-settings/);
 });
 
+test("painted terrain renders with its variant name and layer", () => {
+  const { root, view } = playerView({ map: {
+    id: 1, name: "Terrain map", mapWidth: 800, mapHeight: 600, columns: 1, rows: 1, hexSize: 32, offsetX: 0, offsetY: 0,
+    backgroundOpacity: 1, terrainOpacity: .85, hexes: [{ col: 0, row: 0, isFog: false, terrainType: "wasteland", terrainClimate: "arid" }],
+    features: [], zones: [], notes: [], tokens: []
+  } });
+
+  view.render();
+
+  assert.match(root.innerHTML, /map-hex-terrain/);
+  assert.match(root.innerHTML, /terrain-tiles\/arid-wasteland\.png/);
+  assert.match(root.innerHTML, /xlink:href="\/terrain-tiles\/arid-wasteland\.png"/);
+  assert.match(root.innerHTML, /Dune desert/);
+});
+
 test("map panning captures the pointer only after movement becomes a drag", () => {
   const { view } = playerView();
   const viewport = { scrollLeft: 40, scrollTop: 25 };
