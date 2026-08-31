@@ -2,6 +2,7 @@ import { prettifyMarkdown } from "./editor-utils.mjs";
 import { filesInFolder, folderSelectionStatus, foldersInFolder, folderVisibilityStatus } from "./admin-utils.mjs";
 import { articleHash, parseRouteHash } from "./route-utils.mjs";
 import { WorldMapView } from "./map-view.mjs";
+import { CONDITIONS, DC_GUIDE, IMPROVISED, MONSTER_STATS, NAMES, QUICK_RULES, TRAVEL, WEATHER } from "./gm-screen-data.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -346,11 +347,29 @@ async function savePage() {
   catch (error) { toast(error.message); }
 }
 
+function gmPanel(title, body, className = "") { return `<section class="gm-panel ${className}"><div class="gm-panel-heading"><h2>${title}</h2></div>${body}</section>`; }
+function gmTable(headers, rows, className = "") { return `<div class="gm-table-wrap"><table class="gm-table ${className}"><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`; }
 function renderGM() {
   if (!state.user?.isAdmin) return navigate("#home");
   setChrome("GM screen"); $(".primary-nav [data-action=gm]").classList.add("active");
-  view.innerHTML = `<div class="document-header"><div class="eyebrow">At-the-table utilities</div><h1>GM screen</h1><div class="document-meta">Map data is saved in the wiki database. Initiative and scratch notes stay in this browser.</div></div><div class="gm-grid"><section class="tool-card gm-map-launch"><div><div class="eyebrow">Exploration</div><h2>World map editor</h2><p>Manage active maps, fog of war, discoveries, shared notes, and travelling groups.</p></div><button class="button" data-action="map">Open world map →</button></section><section class="tool-card"><div class="section-head"><h2>Initiative tracker</h2><button data-action="add-initiative">＋ Add combatant</button></div><div id="initiative-list"></div></section><div><section class="tool-card"><h2>Dice roller</h2><div class="dice-buttons">${[4,6,8,10,12,20,100].map((die) => `<button data-die="${die}">d${die}</button>`).join("")}</div><div class="dice-result" id="dice-result">—</div></section><section class="tool-card" style="margin-top:16px"><h2>Session scratchpad</h2><textarea class="quick-notes" id="quick-notes" placeholder="Names, HP, secrets, reminders…"></textarea></section></div></div>`;
-  renderInitiative(); $("#quick-notes").value = localStorage.getItem(STORAGE.notes) || ""; $("#quick-notes").addEventListener("input", (e) => localStorage.setItem(STORAGE.notes, e.target.value));
+  const quickPanels = QUICK_RULES.map((panel) => gmPanel(panel.title, `<ul class="gm-rule-list">${panel.items.map((item) => `<li>${item}</li>`).join("")}</ul>`, "gm-reference-panel")).join("");
+  const dcRows = DC_GUIDE.map(([dc, label]) => [dc, label]);
+  const conditionRows = CONDITIONS.map(([name, description]) => [`<strong>${name}</strong>`, description]);
+  const monsterRows = MONSTER_STATS.map((row) => row);
+  view.innerHTML = `<div class="document-header gm-screen-header"><div><div class="eyebrow">At-the-table command center</div><h1>GM screen</h1><div class="document-meta">Rules, trackers, generators, and session notes in one working view.</div></div><label class="gm-search"><span>Find a rule</span><input id="gm-reference-search" type="search" placeholder="Search conditions, cover, travel…"></label></div>
+    <div class="gm-screen-layout"><aside class="gm-rail"><div class="gm-rail-title">At a glance</div><a href="#gm-quick" data-gm-anchor="gm-quick">Quick rules</a><a href="#gm-checks" data-gm-anchor="gm-checks">Checks & DCs</a><a href="#gm-conditions" data-gm-anchor="gm-conditions">Conditions</a><a href="#gm-travel" data-gm-anchor="gm-travel">Travel & rests</a><a href="#gm-monsters" data-gm-anchor="gm-monsters">Monster math</a><a href="#gm-tools" data-gm-anchor="gm-tools">Session tools</a></aside><main class="gm-screen-content">
+      <section class="gm-reference-section" id="gm-quick"><div class="gm-section-heading"><div><div class="eyebrow">Fast adjudication</div><h2>Quick rules</h2></div><span class="gm-section-index">01</span></div><div class="gm-reference-grid">${quickPanels}</div></section>
+      <section class="gm-reference-section" id="gm-checks"><div class="gm-section-heading"><div><div class="eyebrow">Ability checks</div><h2>Difficulty at a glance</h2></div><span class="gm-section-index">02</span></div>${gmTable(["DC", "Task difficulty"], dcRows, "gm-dc-table")}<div class="gm-callout">When the rules do not name a DC, choose the difficulty that matches the fiction. A character's proficiency and circumstances do the rest.</div></section>
+      <section class="gm-reference-section" id="gm-conditions"><div class="gm-section-heading"><div><div class="eyebrow">Combat reference</div><h2>Conditions & states</h2></div><span class="gm-section-index">03</span></div>${gmTable(["Condition", "At the table"], conditionRows, "gm-conditions-table")}</section>
+      <section class="gm-reference-section" id="gm-travel"><div class="gm-section-heading"><div><div class="eyebrow">Exploration</div><h2>Travel, cover & recovery</h2></div><span class="gm-section-index">04</span></div>${gmTable(["Pace", "Minute", "Hour", "Day", "Notes"], TRAVEL, "gm-travel-table")}${gmPanel("Cover", `<div class="gm-stat-strip"><div><strong>+2</strong><span>Half cover</span></div><div><strong>+5</strong><span>Three-quarters</span></div><div><strong>∞</strong><span>Total cover</span></div></div>`, "gm-inline-panel")}</section>
+      <section class="gm-reference-section" id="gm-monsters"><div class="gm-section-heading"><div><div class="eyebrow">Encounter building</div><h2>Monster statistics</h2></div><span class="gm-section-index">05</span></div>${gmTable(["CR", "AC/DC", "HP", "Atk/Prof", "Attacks", "Damage/round"], monsterRows, "gm-monster-table")}</section>
+      <section class="gm-reference-section" id="gm-tools"><div class="gm-section-heading"><div><div class="eyebrow">Live session tools</div><h2>Keep the table moving</h2></div><span class="gm-section-index">06</span></div><div class="gm-tools-grid"><section class="gm-tool-card gm-initiative"><div class="gm-tool-heading"><h3>Initiative</h3><button data-action="add-initiative">＋ Combatant</button></div><div id="initiative-list"></div><div class="gm-tool-footer"><button data-action="clear-initiative">Clear</button><span id="initiative-round">Round 1</span><button data-action="next-round">Next round</button></div></section><section class="gm-tool-card"><h3>Dice roller</h3><div class="dice-buttons">${[4,6,8,10,12,20,100].map((die) => `<button data-die="${die}">d${die}</button>`).join("")}</div><div class="dice-result" id="dice-result">—</div><label class="gm-custom-roll">Custom roll<input id="custom-roll" placeholder="2d6+3"><button data-action="custom-roll">Roll</button></label></section><section class="gm-tool-card"><h3>Session scratchpad</h3><textarea class="quick-notes" id="quick-notes" placeholder="Names, HP, secrets, reminders…"></textarea></section><section class="gm-tool-card gm-generator-card"><div class="gm-tool-heading"><h3>Generators</h3><button data-gm-generator="weather">New weather</button></div><div class="gm-generator-result" id="gm-generator-result">${WEATHER[0]}</div><button class="button ghost" data-gm-generator="improvised">Improvise a complication</button><button class="button ghost" data-gm-generator="name">Name an NPC</button></section></div></section>
+    </main></div>`;
+  renderInitiative(); $("#quick-notes").value = localStorage.getItem(STORAGE.notes) || ""; $("#quick-notes").addEventListener("input", (e) => localStorage.setItem(STORAGE.notes, e.target.value)); const round = $("#initiative-round"); if (round) round.textContent = `Round ${Number(localStorage.getItem("folder-wiki-round") || 1)}`;
+  $("#gm-reference-search").addEventListener("input", (event) => {
+    const query = event.target.value.toLocaleLowerCase().trim();
+    $$(".gm-reference-section").forEach((section) => section.classList.toggle("gm-filtered", Boolean(query) && !section.textContent.toLocaleLowerCase().includes(query)));
+  });
 }
 let worldMapView;
 async function renderWorldMap() {
@@ -362,6 +381,17 @@ async function renderWorldMap() {
 function initiatives() { return JSON.parse(localStorage.getItem(STORAGE.initiative) || "[]"); }
 function renderInitiative() { const list = initiatives().sort((a,b) => Number(b.score)-Number(a.score)); $("#initiative-list").innerHTML = list.map((item, index) => `<div class="initiative-row"><input data-init-name="${index}" value="${esc(item.name)}" placeholder="Combatant"><input type="number" data-init-score="${index}" value="${esc(item.score)}" placeholder="Init"><button data-init-remove="${index}">×</button></div>`).join("") || `<div class="empty-state" style="padding:35px 10px">Add combatants when the encounter begins.</div>`; }
 function updateInitiative() { const list = initiatives(); $$("[data-init-name]").forEach((input) => list[input.dataset.initName].name = input.value); $$("[data-init-score]").forEach((input) => list[input.dataset.initScore].score = input.value); localStorage.setItem(STORAGE.initiative, JSON.stringify(list)); }
+function rollExpression(expression) {
+  const match = String(expression || "").trim().match(/^(\d*)d(\d+)([+-]\d+)?$/i); if (!match) return null;
+  const count = Math.min(20, Number(match[1] || 1)); const sides = Number(match[2]); const modifier = Number(match[3] || 0);
+  if (!Number.isInteger(sides) || sides < 2 || sides > 1000) return null;
+  const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
+  return { total: rolls.reduce((sum, roll) => sum + roll, modifier), rolls, modifier };
+}
+function runGMGenerator(kind) {
+  const values = kind === "weather" ? WEATHER : kind === "improvised" ? IMPROVISED : NAMES;
+  const result = $("#gm-generator-result"); if (result) result.textContent = values[Math.floor(Math.random() * values.length)];
+}
 
 async function renderAdmin() {
   setChrome("File visibility"); $(".primary-nav [data-action=admin]").classList.add("active");
@@ -534,6 +564,8 @@ async function loadFiles(refresh = false) { const suffix = refresh ? "?refresh=1
 
 document.addEventListener("click", async (event) => {
   const authMode = event.target.closest("[data-auth-mode]"); if (authMode) return setAuthMode(authMode.dataset.authMode);
+  const gmAnchor = event.target.closest("[data-gm-anchor]");
+  if (gmAnchor) { event.preventDefault(); document.getElementById(gmAnchor.dataset.gmAnchor)?.scrollIntoView({ behavior: "smooth", block: "start" }); history.replaceState(null, "", "#gm"); return; }
   const markdownTool = event.target.closest("[data-md-command]");
   if (markdownTool) return runMarkdownCommand(markdownTool.dataset.mdCommand);
   const editSource = event.target.closest("[data-edit-file]");
@@ -566,6 +598,7 @@ document.addEventListener("click", async (event) => {
   const deleteRole = event.target.closest("[data-delete-role]"); if (deleteRole) return deleteManaged("role", deleteRole.dataset.deleteRole);
   const deleteUser = event.target.closest("[data-delete-user]"); if (deleteUser) return deleteManaged("user", deleteUser.dataset.deleteUser);
   const die = event.target.closest("[data-die]"); if (die) { const sides = Number(die.dataset.die); $("#dice-result").textContent = Math.floor(Math.random() * sides) + 1; return; }
+  const generator = event.target.closest("[data-gm-generator]"); if (generator) return runGMGenerator(generator.dataset.gmGenerator);
   const remove = event.target.closest("[data-init-remove]"); if (remove) { const list = initiatives(); list.splice(Number(remove.dataset.initRemove), 1); localStorage.setItem(STORAGE.initiative, JSON.stringify(list)); return renderInitiative(); }
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
@@ -579,6 +612,9 @@ document.addEventListener("click", async (event) => {
   if (action === "save") return savePage();
   if (action === "pin" && state.current) { const pins = pinned(), at = pins.indexOf(state.current.path); at >= 0 ? pins.splice(at,1) : pins.push(state.current.path); setPinned(pins); event.target.classList.toggle("is-pinned"); toast(at >= 0 ? "Removed from pinned" : "Pinned for quick access"); }
   if (action === "add-initiative") { const list = initiatives(); list.push({ name:"", score:"" }); localStorage.setItem(STORAGE.initiative, JSON.stringify(list)); renderInitiative(); $$("[data-init-name]").at(-1)?.focus(); }
+  if (action === "clear-initiative") { localStorage.removeItem(STORAGE.initiative); return renderInitiative(); }
+  if (action === "next-round") { const round = Number(localStorage.getItem("folder-wiki-round") || 1) + 1; localStorage.setItem("folder-wiki-round", round); const output = $("#initiative-round"); if (output) output.textContent = `Round ${round}`; }
+  if (action === "custom-roll") { const result = rollExpression($("#custom-roll")?.value); if (!result) return toast("Use a roll like 2d6+3"); $("#dice-result").textContent = `${result.total} (${result.rolls.join(", ")})`; }
   if (action === "admin-expand-all") { state.adminCollapsed.clear(); return renderAdminManager(); }
   if (action === "admin-collapse-all") { state.folderPaths.forEach((folder) => state.adminCollapsed.add(folder)); return renderAdminManager(); }
   if (action === "admin-show-selected") return updateAdminVisibility(selectedAdminPaths(), true);
