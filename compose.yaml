@@ -1,6 +1,7 @@
 services:
   wiki:
     build: .
+    user: "${FOLDER_WIKI_UID:-1000}:${FOLDER_WIKI_GID:-1000}"
     ports:
       - "${FOLDER_WIKI_PORT:-4173}:4173"
     volumes:

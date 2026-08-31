@@ -30,8 +30,15 @@ The available Compose settings are:
 | --- | --- | --- |
 | `FOLDER_WIKI_PORT` | `4173` | Port exposed on the host |
 | `FOLDER_WIKI_CONTENT` | `./content` | Host directory mounted at `/app/content`; includes the database in `.folder-wiki/` |
+| `FOLDER_WIKI_UID` | `1000` | Linux user ID used by the container; set to the content owner's `id -u` |
+| `FOLDER_WIKI_GID` | `1000` | Linux group ID used by the container; set to the content group's `id -g` |
 
-Use an absolute path when the persistent directory should live away from the checkout. Create it before starting the container and ensure Docker can read and write it.
+Use an absolute path when the persistent directory should live away from the checkout. Set `FOLDER_WIKI_UID` and `FOLDER_WIKI_GID` to the values returned by `id -u` and `id -g` for the account owning that directory. The directory and its existing `.folder-wiki/` contents must be readable and writable by that user.
+
+```bash
+id -u
+id -g
+```
 
 If upgrading an older Compose setup that used a separate `.folder-wiki/` directory, stop the old container and copy that directory into the configured content directory as `.folder-wiki/` before starting the new Compose configuration. For example:
 
