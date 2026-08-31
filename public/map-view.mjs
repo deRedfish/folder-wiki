@@ -1,5 +1,5 @@
 import { cellKey, gridDimensions, hexCenter, hexPoints, nearestHex } from "./map-utils.mjs";
-import { TERRAIN_TYPES, terrainClimates, terrainName, terrainPalette } from "./terrain.mjs";
+import { TERRAIN_TYPES, terrainAsset, terrainClimates, terrainName, terrainPalette } from "./terrain.mjs";
 
 export const FEATURE_ICONS = [
   ["🏰", "Fortress"], ["🏘", "Settlement"], ["⛺", "Camp"], ["⚔", "Danger"], ["🐉", "Monster"],
@@ -11,7 +11,6 @@ const esc = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({ "&": 
 const option = (value, label, selected) => `<option value="${esc(value)}" ${String(value) === String(selected) ? "selected" : ""}>${esc(label)}</option>`;
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const short = (value, length = 24) => String(value || "").length > length ? String(value).slice(0, length - 1) + "…" : String(value || "");
-const terrainTexture = (type) => `/terrain-textures/${encodeURIComponent(type)}.svg`;
 
 export class WorldMapView {
   constructor({ root, api, toast, user }) {
@@ -183,7 +182,7 @@ export class WorldMapView {
       const title = hex.isFog && !admin ? "Unexplored" : [terrain?.name, zone?.name, feature?.name, notes ? `${notes} note${notes === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "Unmarked";
       const clipId = `terrain-${this.map.id}-${col}-${row}`;
       cells.push(`<g class="${classes} ${terrain ? "has-terrain" : ""}" data-map-hex="${key}" style="--zone-color:${esc(zone?.color || "#000000")};--terrain-base:${esc(terrain?.base || "transparent")};--terrain-detail:${esc(terrain?.detail || "transparent")};--terrain-accent:${esc(terrain?.accent || "transparent")}"><title>${esc(title)}</title>
-        ${terrain ? `<defs><clipPath id="${clipId}"><polygon points="${points}"></polygon></clipPath></defs><polygon class="map-hex-terrain" style="opacity:${this.map.terrainOpacity}" points="${points}"></polygon><image class="map-hex-terrain-texture" href="${terrainTexture(hex.terrainType)}" x="${center.x - this.map.hexSize}" y="${center.y - this.map.hexSize}" width="${this.map.hexSize * 2}" height="${this.map.hexSize * 2}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})" style="opacity:${this.map.terrainOpacity}"></image>` : ""}<polygon class="map-hex-zone" points="${points}"></polygon>${hex.isFog ? `<polygon class="map-hex-fog" points="${points}"></polygon>` : ""}
+        ${terrain ? `<defs><clipPath id="${clipId}"><polygon points="${points}"></polygon></clipPath></defs><polygon class="map-hex-terrain" style="opacity:${this.map.terrainOpacity}" points="${points}"></polygon><image class="map-hex-terrain-texture" href="${terrainAsset(hex.terrainType, hex.terrainClimate)}" x="${center.x - this.map.hexSize}" y="${center.y - this.map.hexSize}" width="${this.map.hexSize * 2}" height="${this.map.hexSize * 2}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})" style="opacity:${this.map.terrainOpacity}"></image>` : ""}<polygon class="map-hex-zone" points="${points}"></polygon>${hex.isFog ? `<polygon class="map-hex-fog" points="${points}"></polygon>` : ""}
         <polygon class="map-hex-outline" points="${points}"></polygon>
         ${feature ? `<text class="map-feature-label" x="${center.x}" y="${center.y - 8}">${esc(short(feature.name))}</text><text class="map-feature-icon" x="${center.x}" y="${center.y + 15}">${esc(feature.icon)}</text>` : ""}
         ${notes && !(hex.isFog && !admin) ? `<circle class="map-note-dot" cx="${center.x + this.map.hexSize * .58}" cy="${center.y - this.map.hexSize * .55}" r="4"/>` : ""}</g>`);
