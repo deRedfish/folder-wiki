@@ -16,7 +16,7 @@ docker compose up --build -d
 
 Open `http://127.0.0.1:4173`. The first account created becomes the GM administrator.
 
-Compose uses `content/` beside the repository by default. The database and runtime state are stored in `content/.folder-wiki/`, so copying or linking that one directory preserves the complete wiki. To choose another persistent location or a different host port:
+Compose requires `FOLDER_WIKI_CONTENT` and uses the value as its only persistent mount. The example value is `content/` beside the repository. The database and runtime state are stored in `<content>/.folder-wiki/`, so copying or linking that one directory preserves the complete wiki. To choose another persistent location or a different host port:
 
 ```powershell
 Copy-Item .env.example .env
