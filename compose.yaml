@@ -4,7 +4,7 @@ services:
     ports:
       - "${FOLDER_WIKI_PORT:-4173}:4173"
     volumes:
-      - "${FOLDER_WIKI_CONTENT:?Set FOLDER_WIKI_CONTENT to the wiki content directory}:/app/content"
+      - "${FOLDER_WIKI_CONTENT:-./content}:/app/content"
     environment:
       RUNTIME_ROOT: /app/content/.folder-wiki
     restart: unless-stopped
