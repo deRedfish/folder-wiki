@@ -66,9 +66,9 @@ Docker Desktop or Docker Engine with the Compose plugin is required:
 docker compose up --build
 ```
 
-Open <http://127.0.0.1:4173>. Compose bind-mounts `content/` for wiki files and `.folder-wiki/` for the SQLite database. Back up both directories and configure equivalent persistent volumes on a container host. The image listens on port `4173`, exposes `/api/health`, and includes Poppler's `pdftotext` for PDF search indexing.
+Open <http://127.0.0.1:4173>. Compose bind-mounts `content/` for wiki files and stores the SQLite database in its hidden `content/.folder-wiki/` directory. Back up or move that one directory to preserve the complete wiki. The image listens on port `4173`, exposes `/api/health`, and includes Poppler's `pdftotext` for PDF search indexing.
 
-Copy `.env.example` to `.env` to change the published port or the two persistent host directories without editing Compose:
+Copy `.env.example` to `.env` to change the published port or persistent host directory without editing Compose:
 
 ```powershell
 Copy-Item .env.example .env
@@ -186,7 +186,7 @@ Fog, zones, features, notes, and tokens are independent layers and can coexist o
 
 Both GM and player views can zoom while retaining the currently viewed area, then drag the map to pan around it. The player view otherwise contains only the active map's title and map; selecting a revealed hex opens its visible zone, feature descriptions, notes, and tokens without exposing GM controls or map settings.
 
-Map configuration, hex state, zones, features, reusable templates, notes, tokens, visibility settings, and the active-map choice are stored in `.folder-wiki/wiki.db`. Existing single-feature maps and templates are migrated automatically. Uploaded backgrounds remain ordinary files in `content/`, so back up both locations.
+Map configuration, hex state, zones, features, reusable templates, notes, tokens, visibility settings, and the active-map choice are stored in `.folder-wiki/wiki.db`. Existing single-feature maps and templates are migrated automatically. In Compose deployments, `.folder-wiki/` is inside the configured content directory, so one backup preserves both uploaded files and database state.
 
 ## Local browser data
 
@@ -227,7 +227,7 @@ For internet deployment, keep Folder Wiki behind an HTTPS reverse proxy and do n
 
 ## Backups
 
-Wiki content remains ordinary files. Back up both `content/` and `.folder-wiki/wiki.db`; the latter contains accounts, roles, sessions, and access grants. To version your own content, remove the `content/` rule from `.gitignore` or keep the directory in a separate private repository. Never publish the runtime database.
+Wiki content remains ordinary files. With Docker Compose, back up the configured content directory, including its hidden `.folder-wiki/wiki.db`; that database contains accounts, roles, sessions, maps, and access grants. With a direct npm deployment, back up both `CONTENT_ROOT` and `RUNTIME_ROOT`. To version your own content, remove the `content/` rule from `.gitignore` or keep the directory in a separate private repository. Never publish the runtime database.
 
 ## Development
 

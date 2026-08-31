@@ -5,5 +5,6 @@ services:
       - "${FOLDER_WIKI_PORT:-4173}:4173"
     volumes:
       - "${FOLDER_WIKI_CONTENT:-./content}:/app/content"
-      - "${FOLDER_WIKI_DATA:-./.folder-wiki}:/app/data"
+    environment:
+      RUNTIME_ROOT: /app/content/.folder-wiki
     restart: unless-stopped

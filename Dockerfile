@@ -9,17 +9,17 @@ COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --chown=node:node auth.mjs map-store.mjs server.mjs README.md LICENSE ./
 COPY --chown=node:node public ./public
-RUN mkdir -p /app/content /app/data && chown -R node:node /app/content /app/data
+RUN mkdir -p /app/content/.folder-wiki && chown -R node:node /app/content
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=4173 \
     CONTENT_ROOT=/app/content \
-    RUNTIME_ROOT=/app/data
+    RUNTIME_ROOT=/app/content/.folder-wiki
 
 USER node
 EXPOSE 4173
-VOLUME ["/app/content", "/app/data"]
+VOLUME ["/app/content"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:4173/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 

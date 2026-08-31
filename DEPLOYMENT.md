@@ -2,10 +2,7 @@
 
 Folder Wiki is a stateful Node.js web application. Every supported deployment runs the complete server so login, editing, search, user management, and role-based file visibility continue to work.
 
-Whichever deployment method you choose, persist and back up both:
-
-- the content directory, containing the source files for the wiki;
-- the runtime directory, containing `wiki.db` with accounts, roles, sessions, and visibility grants.
+For a Docker Compose deployment, persist and back up the single content directory. It contains the source files for the wiki and the hidden `.folder-wiki/` runtime directory, which contains `wiki.db` with accounts, roles, sessions, maps, and visibility grants.
 
 ## Option 1: Docker Compose
 
@@ -19,7 +16,7 @@ docker compose up --build -d
 
 Open `http://127.0.0.1:4173`. The first account created becomes the GM administrator.
 
-Compose uses `content/` and `.folder-wiki/` beside the repository by default. To choose other persistent locations or a different host port:
+Compose uses `content/` beside the repository by default. The database and runtime state are stored in `content/.folder-wiki/`, so copying or linking that one directory preserves the complete wiki. To choose another persistent location or a different host port:
 
 ```powershell
 Copy-Item .env.example .env
@@ -32,10 +29,17 @@ The available Compose settings are:
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `FOLDER_WIKI_PORT` | `4173` | Port exposed on the host |
-| `FOLDER_WIKI_CONTENT` | `./content` | Host directory mounted at `/app/content` |
-| `FOLDER_WIKI_DATA` | `./.folder-wiki` | Host directory mounted at `/app/data` |
+| `FOLDER_WIKI_CONTENT` | `./content` | Host directory mounted at `/app/content`; includes the database in `.folder-wiki/` |
 
-Use absolute paths when the persistent directories should live away from the checkout. Create the directories before starting the container and ensure Docker can read and write them.
+Use an absolute path when the persistent directory should live away from the checkout. Create it before starting the container and ensure Docker can read and write it.
+
+If upgrading an older Compose setup that used a separate `.folder-wiki/` directory, stop the old container and copy that directory into the configured content directory as `.folder-wiki/` before starting the new Compose configuration. For example:
+
+```powershell
+Copy-Item -Recurse .folder-wiki .\content\.folder-wiki
+```
+
+After this one-time move, only the configured content directory needs to be backed up.
 
 Useful commands:
 
@@ -59,14 +63,14 @@ Compose replaces the application container while retaining the mounted content a
 
 ### Use the image without Compose
 
-The image expects two writable persistent mounts and listens on container port 4173:
+The image expects one writable persistent mount and listens on container port 4173:
 
 ```powershell
 docker build -t folder-wiki .
-docker run -d --name folder-wiki --restart unless-stopped -p 4173:4173 --mount type=bind,source="C:\wiki\content",target=/app/content --mount type=bind,source="C:\wiki\data",target=/app/data folder-wiki
+docker run -d --name folder-wiki --restart unless-stopped -p 4173:4173 --mount type=bind,source="C:\wiki\content",target=/app/content folder-wiki
 ```
 
-Adjust the two host paths for your operating system. Container platforms should map equivalent persistent storage to `/app/content` and `/app/data`. The image provides `GET /api/health` as its health check and shuts down cleanly when the platform sends `SIGTERM`.
+Adjust the host path for your operating system. Container platforms should map persistent storage to `/app/content`. The image provides `GET /api/health` as its health check and shuts down cleanly when the platform sends `SIGTERM`.
 
 ## Option 2: Node.js and npm
 
@@ -109,8 +113,8 @@ A healthy instance returns `{"ok":true}`.
 
 ## Backups and migration
 
-Stop the application or container before taking a filesystem-level backup so the SQLite database and content snapshot are consistent. Copy both persistent directories to the backup destination.
+Stop the application or container before taking a filesystem-level backup so the SQLite database and content snapshot are consistent. Copy the complete content directory, including its hidden `.folder-wiki/` directory, to the backup destination.
 
-To migrate, install Folder Wiki on the new host, restore the two directories, and start the application. Paths inside the content directory remain portable; the database stores content paths relative to that root.
+To migrate, clone Folder Wiki on the new host, set `FOLDER_WIKI_CONTENT` to the restored directory (or place it at `./content`), and start the application. Paths inside the content directory remain portable; the database stores content paths relative to that root. No separate database restore is required.
 
 Never bake personal content or the runtime database into a public container image. The supplied `.dockerignore` excludes both directories from image builds.
