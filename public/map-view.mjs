@@ -1,4 +1,5 @@
 import { cellKey, gridDimensions, hexCenter, hexPoints, nearestHex } from "./map-utils.mjs";
+import { TERRAIN_TYPES, terrainClimates, terrainName, terrainPalette } from "./terrain.mjs";
 
 export const FEATURE_ICONS = [
   ["🏰", "Fortress"], ["🏘", "Settlement"], ["⛺", "Camp"], ["⚔", "Danger"], ["🐉", "Monster"],
@@ -17,6 +18,7 @@ export class WorldMapView {
     this.maps = []; this.images = []; this.templates = []; this.map = null; this.persistedMap = null; this.selected = null;
     this.zoom = .8; this.renderedZoom = .8; this.drag = null; this.pan = null; this.paintStroke = null; this.paintMode = "inspect";
     this.suppressClickUntil = 0; this.tempFeatureId = -1; this.zoneBrushId = null; this.zoneEditor = null;
+    this.terrainBrush = { type: "plains", climate: "" };
     this.brush = { name: "Fortress", icon: "🏰", description: "", isVisible: true };
     this.selectedTemplateId = null; this.featureTimers = new Map(); this.stageFrame = null;
     root.addEventListener("click", (event) => this.click(event));
@@ -43,6 +45,7 @@ export class WorldMapView {
   async load(mapId) {
     this.map = await this.api(`/api/maps/${mapId}`);
     for (const key of ["hexes", "features", "zones", "notes", "tokens"]) this.map[key] ||= [];
+    this.map.backgroundOpacity ??= 1; this.map.terrainOpacity ??= .85;
     this.persistedMap = clone(this.map);
     if (this.selected && (this.selected.col >= this.map.columns || this.selected.row >= this.map.rows)) this.selected = null;
     if (this.zoneBrushId && !this.map.zones.some((zone) => zone.id === this.zoneBrushId)) this.zoneBrushId = null;
@@ -92,7 +95,7 @@ export class WorldMapView {
   surfaceHtml() {
     const admin = this.getUser().isAdmin;
     return `<div class="map-surface ${admin ? "gm-map paint-" + this.paintMode : "player-map paint-inspect"}" style="width:${this.map.mapWidth}px;height:${this.map.mapHeight}px;transform:scale(${this.zoom})">
-      ${this.map.imagePath ? `<img class="map-background" src="/api/maps/${this.map.id}/image?v=${encodeURIComponent(this.map.updatedAt)}" alt="">` : '<div class="map-background-placeholder"><span>Map image not set</span></div>'}${this.gridHtml()}</div>`;
+      ${this.map.imagePath ? `<img class="map-background" style="opacity:${this.map.backgroundOpacity}" src="/api/maps/${this.map.id}/image?v=${encodeURIComponent(this.map.updatedAt)}" alt="">` : '<div class="map-background-placeholder"><span>Map image not set</span></div>'}${this.gridHtml()}</div>`;
   }
 
   zoomControlHtml(label) {
@@ -116,11 +119,17 @@ export class WorldMapView {
       <input data-map-setting="${name}" type="range" min="${min}" max="${max}" step="${step}" value="${this.map[name]}"></label>`;
   }
 
+  opacitySlider(name, label) {
+    return `<label class="map-range"><span>${label}<output data-map-output="${name}">${Math.round(this.map[name] * 100)}%</output></span>
+      <input data-map-setting="${name}" type="range" min="0" max="1" step="0.05" value="${this.map[name]}"></label>`;
+  }
+
   settingsHtml() {
     const images = ['<option value="">No background image</option>', ...this.images.map((image) => option(image.path, image.path, this.map.imagePath || ""))].join("");
     return `<details class="map-settings"><summary>Map and grid settings</summary><div class="map-settings-body"><div class="map-live-settings">
       <label class="map-text-setting">Map name<input data-map-setting="name" value="${esc(this.map.name)}" required maxlength="80"></label>
       <label class="map-text-setting">Background image<select data-map-setting="imagePath">${images}</select></label>
+      ${this.opacitySlider("backgroundOpacity", "Background opacity")}${this.opacitySlider("terrainOpacity", "Terrain opacity")}
       ${this.slider("mapWidth", "Map width", 480, 4000, 20)}${this.slider("mapHeight", "Map height", 320, 3000, 20)}
       ${this.slider("hexSize", "Hex size", 16, 140, 1)}${this.slider("offsetX", "Grid X alignment", -140, 0, 1)}${this.slider("offsetY", "Grid Y alignment", -140, 0, 1)}
       <div class="map-auto-grid"><span>Automatic coverage</span><strong data-map-auto-grid>${this.map.columns} × ${this.map.rows} hexes</strong></div></div>
@@ -139,10 +148,12 @@ export class WorldMapView {
       <label>Name<input data-brush-feature="name" value="${esc(this.brush.name)}" maxlength="80"></label>
       <label class="brush-description">Description<input data-brush-feature="description" value="${esc(this.brush.description)}" maxlength="2000"></label>
       <label class="map-inline-check"><input data-brush-feature="isVisible" type="checkbox" ${this.brush.isVisible ? "checked" : ""}> Visible to players</label></div>`;
+    if (this.paintMode === "terrain") options = `<div class="map-brush-options terrain-brush"><label>Terrain<select id="map-terrain-type"><option value="">Erase terrain</option>${TERRAIN_TYPES.map((terrain) => option(terrain.value, `${terrain.icon}  ${terrain.label}`, this.terrainBrush?.type)).join("")}</select></label>
+      <label>Climate<select id="map-terrain-climate">${terrainClimates(this.terrainBrush?.type).map((climate) => option(climate.value, `${climate.icon}  ${climate.label}`, this.terrainBrush?.climate)).join("")}</select></label></div>`;
     if (this.paintMode === "zone") options = `<div class="map-brush-options zone-brush"><label>Zone<select id="map-zone-brush"><option value="">Choose a zone…</option>${this.map.zones.map((zone) => option(zone.id, zone.name, this.zoneBrushId)).join("")}</select></label>
       <button data-map-action="new-zone">＋ New zone</button><button data-map-action="edit-zone" ${this.zoneBrushId ? "" : "disabled"}>Edit zone</button></div>`;
-    const help = ({ inspect: "Select hexes or drag to move the map.", fog: "Drag across hexes to cover them.", reveal: "Drag across hexes to reveal them.", feature: "Drag to add this feature and make it the displayed marker.", zone: "Drag to paint the selected zone.", "clear-zone": "Drag to remove zone color from hexes." })[this.paintMode];
-    return `<div class="map-paint-toolbar"><div class="map-paint-modes">${mode("inspect", "Inspect")}${mode("fog", "Paint fog")}${mode("reveal", "Reveal")}${mode("feature", "Place feature")}${mode("zone", "Paint zone")}${mode("clear-zone", "Clear zone")}</div>
+    const help = ({ inspect: "Select hexes or drag to move the map.", fog: "Drag across hexes to cover them.", reveal: "Drag across hexes to reveal them.", feature: "Drag to add this feature and make it the displayed marker.", terrain: "Drag to paint terrain across hexes.", zone: "Drag to paint the selected zone.", "clear-zone": "Drag to remove zone color from hexes." })[this.paintMode];
+    return `<div class="map-paint-toolbar"><div class="map-paint-modes">${mode("inspect", "Inspect")}${mode("fog", "Paint fog")}${mode("reveal", "Reveal")}${mode("terrain", "Paint terrain")}${mode("feature", "Place feature")}${mode("zone", "Paint zone")}${mode("clear-zone", "Clear zone")}</div>
       ${options}<span>${help}</span>${this.zoneEditorHtml()}</div>`;
   }
 
@@ -163,13 +174,14 @@ export class WorldMapView {
     for (let row = 0; row < this.map.rows; row++) for (let col = 0; col < this.map.columns; col++) {
       const key = cellKey(col, row); const hex = states.get(key) || { col, row, isFog: false };
       const notes = this.notesAt(col, row).length; const zone = this.zoneAt(col, row); const feature = this.displayedFeatureAt(col, row);
+      const terrain = hex.terrainType ? { ...hex, name: terrainName(hex.terrainType, hex.terrainClimate), ...terrainPalette(hex.terrainType, hex.terrainClimate), icon: TERRAIN_TYPES.find((item) => item.value === hex.terrainType)?.icon || "" } : null;
       const selected = this.selected?.col === col && this.selected?.row === row && !(!admin && hex.isFog);
       const classes = ["map-hex", hex.isFog ? "is-fog" : "", zone ? "has-zone" : "", zone && !zone.isVisible ? "zone-viewer-hidden" : "",
         feature ? "has-feature" : "", feature && !feature.isVisible ? "feature-viewer-hidden" : "", notes ? "has-notes" : "", selected ? "is-selected" : ""].filter(Boolean).join(" ");
       const center = hexCenter(this.map, col, row); const points = hexPoints(this.map, col, row);
-      const title = hex.isFog && !admin ? "Unexplored" : [zone?.name, feature?.name, notes ? `${notes} note${notes === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "Unmarked";
-      cells.push(`<g class="${classes}" data-map-hex="${key}" style="--zone-color:${esc(zone?.color || "#000000")}"><title>${esc(title)}</title>
-        <polygon class="map-hex-zone" points="${points}"></polygon>${hex.isFog ? `<polygon class="map-hex-fog" points="${points}"></polygon>` : ""}
+      const title = hex.isFog && !admin ? "Unexplored" : [terrain?.name, zone?.name, feature?.name, notes ? `${notes} note${notes === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "Unmarked";
+      cells.push(`<g class="${classes} ${terrain ? "has-terrain" : ""}" data-map-hex="${key}" style="--zone-color:${esc(zone?.color || "#000000")};--terrain-base:${esc(terrain?.base || "transparent")};--terrain-detail:${esc(terrain?.detail || "transparent")};--terrain-accent:${esc(terrain?.accent || "transparent")}"><title>${esc(title)}</title>
+        ${terrain ? `<polygon class="map-hex-terrain" style="opacity:${this.map.terrainOpacity}" points="${points}"></polygon><text class="map-terrain-icon" style="opacity:${this.map.terrainOpacity}" x="${center.x}" y="${center.y + 6}">${esc(terrain.icon)}</text>` : ""}<polygon class="map-hex-zone" points="${points}"></polygon>${hex.isFog ? `<polygon class="map-hex-fog" points="${points}"></polygon>` : ""}
         <polygon class="map-hex-outline" points="${points}"></polygon>
         ${feature ? `<text class="map-feature-label" x="${center.x}" y="${center.y - 8}">${esc(short(feature.name))}</text><text class="map-feature-icon" x="${center.x}" y="${center.y + 15}">${esc(feature.icon)}</text>` : ""}
         ${notes && !(hex.isFog && !admin) ? `<circle class="map-note-dot" cx="${center.x + this.map.hexSize * .58}" cy="${center.y - this.map.hexSize * .55}" r="4"/>` : ""}</g>`);
@@ -299,6 +311,8 @@ export class WorldMapView {
     if (event.target.matches("#map-switcher")) return this.load(Number(event.target.value)).catch((error) => this.toast(error.message));
     if (event.target.matches("[data-map-setting]")) return this.persistMapSetting(event.target);
     if (event.target.matches("#map-zone-brush")) { this.zoneBrushId = Number(event.target.value) || null; return; }
+    if (event.target.matches("#map-terrain-type")) { this.terrainBrush = { type: event.target.value, climate: "" }; return this.render(); }
+    if (event.target.matches("#map-terrain-climate")) { this.terrainBrush.climate = event.target.value; return; }
     if (event.target.matches("[data-brush-feature]")) return this.updateBrush(event.target);
     if (event.target.matches("#map-hex-fog")) return this.setSelectedFog(event.target.checked);
     if (event.target.matches("#map-hex-zone")) return this.setSelectedZone(Number(event.target.value) || null);
@@ -315,7 +329,9 @@ export class WorldMapView {
       this.zoom = Number(event.target.value) / 100; this.root.querySelector("#map-zoom-output").textContent = event.target.value + "%"; return this.renderStage(focus);
     }
     if (event.target.matches("[data-map-setting]")) {
-      const key = event.target.dataset.mapSetting; if (!["mapWidth","mapHeight","hexSize","offsetX","offsetY"].includes(key)) return;
+      const key = event.target.dataset.mapSetting;
+      if (["backgroundOpacity", "terrainOpacity"].includes(key)) { this.map[key] = Number(event.target.value); this.root.querySelector(`[data-map-output="${key}"]`).textContent = `${Math.round(this.map[key] * 100)}%`; return this.renderStage(); }
+      if (!["mapWidth","mapHeight","hexSize","offsetX","offsetY"].includes(key)) return;
       this.map[key] = Number(event.target.value); Object.assign(this.map, gridDimensions(this.map)); this.root.querySelector(`[data-map-output="${key}"]`).textContent = event.target.value + " px";
       this.root.querySelector("[data-map-auto-grid]").textContent = `${this.map.columns} × ${this.map.rows} hexes`;
       this.root.querySelector("#map-grid-summary").textContent = `${this.map.columns} × ${this.map.rows} automatic grid`; return this.renderStage();
@@ -493,6 +509,12 @@ export class WorldMapView {
       const existing = this.hexState().get(cellKey(col, row)) || { col, row, isFog: false }; const next = { ...existing, isFog: this.paintMode === "fog" };
       const index = this.map.hexes.findIndex((hex) => hex.col === col && hex.row === row); if (index >= 0) this.map.hexes[index] = next; else this.map.hexes.push(next);
     }
+    if (this.paintMode === "terrain") {
+      const existing = this.hexState().get(cellKey(col, row)) || { col, row, isFog: false };
+      const next = { ...existing, terrainType: this.terrainBrush.type || undefined, terrainClimate: this.terrainBrush.type ? this.terrainBrush.climate : undefined };
+      if (!next.terrainType) { delete next.terrainType; delete next.terrainClimate; }
+      const index = this.map.hexes.findIndex((hex) => hex.col === col && hex.row === row); if (index >= 0) this.map.hexes[index] = next; else this.map.hexes.push(next);
+    }
     if (this.paintMode === "zone" || this.paintMode === "clear-zone") {
       for (const zone of this.map.zones) zone.hexes = zone.hexes.filter((hex) => hex.col !== col || hex.row !== row);
       if (this.paintMode === "zone") this.map.zones.find((zone) => zone.id === this.zoneBrushId)?.hexes.push({ col, row });
@@ -511,6 +533,7 @@ export class WorldMapView {
   }
 
   canStartPaint() {
+    if (this.paintMode === "terrain" && !this.terrainBrush) { this.terrainBrush = { type: "", climate: "" }; }
     if (this.paintMode === "zone" && !this.zoneBrushId) { this.toast("Create or choose a zone first"); return false; }
     if (this.paintMode === "feature" && !this.brush.name.trim()) { this.toast("Give the feature brush a name first"); return false; }
     return true;
@@ -578,6 +601,8 @@ export class WorldMapView {
     let path; let body;
     if (this.paintMode === "fog" || this.paintMode === "reveal") {
       path = `/api/maps/${this.map.id}/hexes`; body = { hexes: hexes.map((hex) => ({ ...hex, isFog: this.paintMode === "fog" })) };
+    } else if (this.paintMode === "terrain") {
+      path = `/api/maps/${this.map.id}/terrain`; body = { terrainType: this.terrainBrush.type, terrainClimate: this.terrainBrush.climate, hexes };
     } else if (this.paintMode === "feature") {
       path = `/api/maps/${this.map.id}/features/paint`; body = { ...this.brush, hexes };
     } else {

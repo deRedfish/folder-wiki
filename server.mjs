@@ -271,6 +271,10 @@ const server = http.createServer(async (req, res) => {
     if (mapHexesRoute && req.method === "PUT") {
       requireAdmin(user); const input = await bodyJson(req); maps.setHexes(mapHexesRoute[1], input.hexes); return json(res, { ok: true });
     }
+    const mapTerrainRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/terrain$/);
+    if (mapTerrainRoute && req.method === "PUT") {
+      requireAdmin(user); maps.paintTerrain(mapTerrainRoute[1], await bodyJson(req)); return json(res, { ok: true });
+    }
     const mapFeaturesRoute = url.pathname.match(/^\/api\/maps\/(\d+)\/features$/);
     if (mapFeaturesRoute && req.method === "POST") {
       requireAdmin(user); return json(res, maps.createFeature(mapFeaturesRoute[1], await bodyJson(req), user.id), 201);

@@ -174,7 +174,9 @@ Open **Map and grid settings** to choose any image already stored in the wiki or
 
 Select a hex to open its inspector. Administrators can:
 
-- paint fog, reveal terrain, place features, paint zones, or clear zones across several hexes by clicking and dragging;
+- paint fog, reveal cells, paint or erase terrain, place features, paint zones, or clear zones across several hexes by clicking and dragging;
+- choose water, plains, hills, mountains, dwarf tunnels, caverns, swamps, wasteland, or forest terrain, then qualify it with valid snowy, arid, volcanic, lush, or fey/magic climates;
+- independently adjust background-image and terrain-layer opacity;
 - create named and described zones with translucent colors, then reuse them across any number of hexes;
 - add multiple named, illustrated, and described features to a hex and choose which one supplies its map icon and fantasy-styled label;
 - save a hex's features and notes as a reusable template, then apply that template from the hex inspector without replacing its fog or zone;
@@ -182,7 +184,7 @@ Select a hex to open its inspector. Administrators can:
 - independently decide whether each feature, zone, and token is visible to players;
 - edit or remove any shared note.
 
-Fog, zones, features, notes, and tokens are independent layers and can coexist on the same hex. All users can add notes to revealed hexes and edit or remove their own notes. Hexes with visible notes receive a distinct outline. In the GM view, fog darkens the background and any painted zone beneath it. Player API responses remove every feature, zone assignment, note, and token inside fog before the data reaches the browser; players see a uniform dark gray hex instead. Items marked GM-only are also removed server-side even on revealed hexes. A visible zone remains inspectable to players wherever at least one of its painted hexes is revealed.
+Terrain, fog, zones, features, notes, and tokens are independent layers and can coexist on the same hex. All users can add notes to revealed hexes and edit or remove their own notes. Hexes with visible notes receive a distinct outline. In the GM view, fog darkens the background and painted layers beneath it. Player API responses remove terrain and every other map layer inside fog before the data reaches the browser; players see a uniform dark gray hex instead. Items marked GM-only are also removed server-side even on revealed hexes. A visible zone remains inspectable to players wherever at least one of its painted hexes is revealed.
 
 Both GM and player views can zoom while retaining the currently viewed area, then drag the map to pan around it. The player view otherwise contains only the active map's title and map; selecting a revealed hex opens its visible zone, feature descriptions, notes, and tokens without exposing GM controls or map settings.
 

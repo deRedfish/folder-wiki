@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { gridDimensions } from "./public/map-utils.mjs";
+import { isTerrainCombination } from "./public/terrain.mjs";
 
 const now = () => new Date().toISOString();
 const DEFAULTS = { mapWidth: 1200, mapHeight: 800, hexSize: 42, offsetX: 0, offsetY: 0 };
@@ -31,6 +32,7 @@ function mapRecord(row) {
     id: row.id, name: row.name, imagePath: row.imagePath || null,
     mapWidth: row.mapWidth, mapHeight: row.mapHeight, columns: row.columns, rows: row.rows,
     hexSize: row.hexSize, offsetX: row.offsetX, offsetY: row.offsetY,
+    backgroundOpacity: row.backgroundOpacity, terrainOpacity: row.terrainOpacity,
     isActive: Boolean(row.isActive), createdAt: row.createdAt, updatedAt: row.updatedAt
   };
 }
@@ -51,6 +53,8 @@ export class MapStore {
         hex_size REAL NOT NULL DEFAULT 42,
         offset_x REAL NOT NULL DEFAULT 0,
         offset_y REAL NOT NULL DEFAULT 0,
+        background_opacity REAL NOT NULL DEFAULT 1,
+        terrain_opacity REAL NOT NULL DEFAULT 0.85,
         is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0, 1)),
         created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_at TEXT NOT NULL,
@@ -140,6 +144,10 @@ export class MapStore {
       CREATE INDEX IF NOT EXISTS map_zone_hexes_zone ON map_zone_hexes(zone_id);
     `);
     const columns = (table) => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
+    if (!columns("world_maps").has("background_opacity")) this.db.exec("ALTER TABLE world_maps ADD COLUMN background_opacity REAL NOT NULL DEFAULT 1");
+    if (!columns("world_maps").has("terrain_opacity")) this.db.exec("ALTER TABLE world_maps ADD COLUMN terrain_opacity REAL NOT NULL DEFAULT 0.85");
+    if (!columns("map_hexes").has("terrain_type")) this.db.exec("ALTER TABLE map_hexes ADD COLUMN terrain_type TEXT");
+    if (!columns("map_hexes").has("terrain_climate")) this.db.exec("ALTER TABLE map_hexes ADD COLUMN terrain_climate TEXT NOT NULL DEFAULT ''");
     if (!columns("map_tokens").has("is_visible")) this.db.exec("ALTER TABLE map_tokens ADD COLUMN is_visible INTEGER NOT NULL DEFAULT 1 CHECK (is_visible IN (0, 1))");
     if (!columns("map_hex_templates").has("features_json")) this.db.exec("ALTER TABLE map_hex_templates ADD COLUMN features_json TEXT NOT NULL DEFAULT '[]'");
     const migratedAt = now();
@@ -180,6 +188,7 @@ export class MapStore {
   row(mapId) {
     return this.db.prepare(`SELECT id, name, image_path AS imagePath, map_width AS mapWidth, map_height AS mapHeight,
       grid_columns AS columns, grid_rows AS rows, hex_size AS hexSize, offset_x AS offsetX, offset_y AS offsetY,
+      background_opacity AS backgroundOpacity, terrain_opacity AS terrainOpacity,
       is_active AS isActive, created_at AS createdAt, updated_at AS updatedAt FROM world_maps WHERE id = ?`).get(Number(mapId));
   }
 
@@ -193,6 +202,7 @@ export class MapStore {
     const condition = isAdmin ? "" : "WHERE is_active = 1";
     const rows = this.db.prepare(`SELECT id, name, image_path AS imagePath, map_width AS mapWidth, map_height AS mapHeight,
       grid_columns AS columns, grid_rows AS rows, hex_size AS hexSize, offset_x AS offsetX, offset_y AS offsetY,
+      background_opacity AS backgroundOpacity, terrain_opacity AS terrainOpacity,
       is_active AS isActive, created_at AS createdAt, updated_at AS updatedAt FROM world_maps
       ${condition} ORDER BY is_active DESC, name COLLATE NOCASE`).all();
     return rows.map(mapRecord);
@@ -201,8 +211,13 @@ export class MapStore {
   getMap(mapId, isAdmin) {
     const map = this.requireMap(mapId);
     if (!isAdmin && !map.isActive) return null;
-    const hexes = this.db.prepare(`SELECT column_index AS col, row_index AS row, is_fog AS isFog
-      FROM map_hexes WHERE map_id = ?`).all(map.id).map((hex) => ({ ...hex, isFog: Boolean(hex.isFog) }));
+    const hexes = this.db.prepare(`SELECT column_index AS col, row_index AS row, is_fog AS isFog,
+      terrain_type AS terrainType, terrain_climate AS terrainClimate
+      FROM map_hexes WHERE map_id = ?`).all(map.id).map((hex) => {
+      const result = { col: hex.col, row: hex.row, isFog: Boolean(hex.isFog) };
+      if (hex.terrainType && (isAdmin || !result.isFog)) { result.terrainType = hex.terrainType; result.terrainClimate = hex.terrainClimate; }
+      return result;
+    });
     let features = this.db.prepare(`SELECT id, column_index AS col, row_index AS row, name, icon, description,
       is_displayed AS isDisplayed, is_visible AS isVisible, created_at AS createdAt, updated_at AS updatedAt
       FROM map_features WHERE map_id = ? ORDER BY id`).all(map.id)
@@ -257,14 +272,16 @@ export class MapStore {
       mapHeight: input.mapHeight === undefined ? current.mapHeight : integer(input.mapHeight, "Map height", 240, 6000),
       hexSize: input.hexSize === undefined ? current.hexSize : number(input.hexSize, "Hex size", 10, 240),
       offsetX: input.offsetX === undefined ? current.offsetX : number(input.offsetX, "Grid X offset", -240, 0),
-      offsetY: input.offsetY === undefined ? current.offsetY : number(input.offsetY, "Grid Y offset", -240, 0)
+      offsetY: input.offsetY === undefined ? current.offsetY : number(input.offsetY, "Grid Y offset", -240, 0),
+      backgroundOpacity: input.backgroundOpacity === undefined ? current.backgroundOpacity : number(input.backgroundOpacity, "Background opacity", 0, 1),
+      terrainOpacity: input.terrainOpacity === undefined ? current.terrainOpacity : number(input.terrainOpacity, "Terrain opacity", 0, 1)
     };
     Object.assign(next, gridDimensions(next));
     this.transaction(() => {
       this.db.prepare(`UPDATE world_maps SET name = ?, image_path = ?, map_width = ?, map_height = ?, grid_columns = ?,
-        grid_rows = ?, hex_size = ?, offset_x = ?, offset_y = ?, updated_at = ? WHERE id = ?`).run(
+        grid_rows = ?, hex_size = ?, offset_x = ?, offset_y = ?, background_opacity = ?, terrain_opacity = ?, updated_at = ? WHERE id = ?`).run(
         next.name, next.imagePath, next.mapWidth, next.mapHeight, next.columns, next.rows,
-        next.hexSize, next.offsetX, next.offsetY, now(), current.id
+        next.hexSize, next.offsetX, next.offsetY, next.backgroundOpacity, next.terrainOpacity, now(), current.id
       );
       for (const table of ["map_hexes", "map_features", "map_zone_hexes", "map_notes", "map_tokens"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE map_id = ? AND (column_index >= ? OR row_index >= ?)`).run(current.id, next.columns, next.rows);
@@ -317,9 +334,14 @@ export class MapStore {
   }
 
   writeHex(mapId, col, row, input) {
-    this.db.prepare(`INSERT INTO map_hexes (map_id, column_index, row_index, is_fog)
-      VALUES (?, ?, ?, ?) ON CONFLICT(map_id, column_index, row_index) DO UPDATE SET is_fog = excluded.is_fog`)
-      .run(mapId, col, row, input.isFog ? 1 : 0);
+    const existing = this.db.prepare("SELECT terrain_type AS terrainType, terrain_climate AS terrainClimate FROM map_hexes WHERE map_id = ? AND column_index = ? AND row_index = ?").get(mapId, col, row);
+    const terrainType = Object.hasOwn(input, "terrainType") ? (input.terrainType || null) : (existing?.terrainType || null);
+    const terrainClimate = Object.hasOwn(input, "terrainClimate") ? (input.terrainClimate || "") : (existing?.terrainClimate || "");
+    if (terrainType && !isTerrainCombination(terrainType, terrainClimate)) throw new Error("Invalid terrain combination");
+    this.db.prepare(`INSERT INTO map_hexes (map_id, column_index, row_index, is_fog, terrain_type, terrain_climate)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(map_id, column_index, row_index) DO UPDATE SET is_fog = excluded.is_fog,
+      terrain_type = excluded.terrain_type, terrain_climate = excluded.terrain_climate`)
+      .run(mapId, col, row, input.isFog ? 1 : 0, terrainType, terrainClimate);
   }
 
   setHexes(mapId, inputs) {
@@ -344,6 +366,25 @@ export class MapStore {
         const setFog = this.db.prepare(`INSERT INTO map_hexes (map_id, column_index, row_index, is_fog)
           VALUES (?, ?, ?, 1) ON CONFLICT(map_id, column_index, row_index) DO UPDATE SET is_fog = 1`);
         for (let row = 0; row < map.rows; row++) for (let col = 0; col < map.columns; col++) setFog.run(map.id, col, row);
+      }
+      this.touch(map.id);
+    });
+  }
+
+  paintTerrain(mapId, input) {
+    const map = this.requireMap(mapId);
+    if (!Array.isArray(input.hexes) || !input.hexes.length) throw new Error("Paint at least one hex");
+    if (input.hexes.length > 5000) throw new Error("A paint stroke can contain at most 5000 hexes");
+    const terrainType = input.terrainType || null; const terrainClimate = input.terrainClimate || "";
+    if (terrainType && !isTerrainCombination(terrainType, terrainClimate)) throw new Error("Invalid terrain combination");
+    this.transaction(() => {
+      const paint = this.db.prepare(`INSERT INTO map_hexes (map_id, column_index, row_index, is_fog, terrain_type, terrain_climate)
+        VALUES (?, ?, ?, COALESCE((SELECT is_fog FROM map_hexes WHERE map_id = ? AND column_index = ? AND row_index = ?), 0), ?, ?)
+        ON CONFLICT(map_id, column_index, row_index) DO UPDATE SET terrain_type = excluded.terrain_type,
+        terrain_climate = excluded.terrain_climate`);
+      for (const hex of input.hexes) {
+        const col = integer(hex.col, "Hex column", 0, map.columns - 1); const row = integer(hex.row, "Hex row", 0, map.rows - 1);
+        paint.run(map.id, col, row, map.id, col, row, terrainType, terrainClimate);
       }
       this.touch(map.id);
     });

@@ -23,6 +23,16 @@ test("maps persist independent fog, feature, zone, note, and token layers", asyn
   assert.equal(maps.getMap(first.id, false), null);
 
   maps.setHex(second.id, { col: 2, row: 3, isFog: true });
+  maps.paintTerrain(second.id, { terrainType: "mountains", terrainClimate: "volcanic", hexes: [{ col: 0, row: 0 }] });
+  maps.setHex(second.id, { col: 0, row: 1, isFog: true });
+  maps.paintTerrain(second.id, { terrainType: "forest", terrainClimate: "lush", hexes: [{ col: 0, row: 1 }] });
+  assert.deepEqual(maps.getMap(second.id, true).hexes.find((hex) => hex.col === 0 && hex.row === 0), {
+    col: 0, row: 0, isFog: false, terrainType: "mountains", terrainClimate: "volcanic"
+  });
+  assert.equal(maps.getMap(second.id, true).hexes.find((hex) => hex.col === 0 && hex.row === 1).isFog, true);
+  assert.throws(() => maps.paintTerrain(second.id, { terrainType: "dwarf-tunnels", terrainClimate: "snowy", hexes: [{ col: 1, row: 1 }] }), /Invalid terrain combination/);
+  maps.paintTerrain(second.id, { terrainType: null, hexes: [{ col: 0, row: 1 }] });
+  assert.deepEqual(maps.getMap(second.id, true).hexes.find((hex) => hex.col === 0 && hex.row === 1), { col: 0, row: 1, isFog: true });
   const wyrm = maps.createFeature(second.id, {
     col: 2, row: 3, name: "Sleeping wyrm", icon: "🐉", description: "Older than the road.", isVisible: true
   }, gm.id);
@@ -64,6 +74,7 @@ test("maps persist independent fog, feature, zone, note, and token layers", asyn
 
   const playerMap = maps.getMap(second.id, false);
   assert.deepEqual(playerMap.hexes.find((hex) => hex.col === 2 && hex.row === 3), { col: 2, row: 3, isFog: true });
+  assert.deepEqual(playerMap.hexes.find((hex) => hex.col === 0 && hex.row === 1), { col: 0, row: 1, isFog: true });
   assert.deepEqual(playerMap.features, []);
   assert.deepEqual(playerMap.notes.map((note) => note.body), ["Old bridge."]);
   assert.deepEqual(playerMap.tokens.map((token) => token.label), ["Party"]);
@@ -83,7 +94,7 @@ test("maps persist independent fog, feature, zone, note, and token layers", asyn
   maps.updateMap(second.id, { mapWidth: 320, mapHeight: 240, hexSize: 240, offsetX: 0, offsetY: 0 });
   const resized = maps.getMap(second.id, true);
   assert.equal(resized.mapWidth, 320); assert.equal(resized.columns, 2); assert.equal(resized.rows, 2);
-  assert.equal(resized.hexes.length, 0); assert.equal(resized.features.length, 1);
+  assert.equal(resized.hexes.length, 2); assert.equal(resized.features.length, 1);
   assert.equal(resized.tokens.length, 2); assert.equal(resized.notes.length, 1);
   assert.equal(resized.zones.find((zone) => zone.id === frontier.id).hexes.length, 1);
 
