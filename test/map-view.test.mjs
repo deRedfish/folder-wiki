@@ -57,6 +57,7 @@ test("painted terrain renders with its variant name and layer", () => {
 
   assert.match(root.innerHTML, /map-hex-terrain/);
   assert.match(root.innerHTML, /terrain-tiles\/arid-wasteland\.png/);
+  assert.match(root.innerHTML, /xlink:href="\/terrain-tiles\/arid-wasteland\.png"/);
   assert.match(root.innerHTML, /Dune desert/);
 });
 
