@@ -343,6 +343,7 @@ h1,h2,h3,h4 { font-family:"Libre Caslon Text",Georgia,serif; }
 .map-hex polygon { vector-effect:non-scaling-stroke; }
 .map-hex-zone { fill:rgba(255,255,255,.025); stroke:none; transition:fill .12s; }
 .map-hex-terrain { fill:var(--terrain-base); stroke:var(--terrain-detail); stroke-width:2; stroke-opacity:.5; pointer-events:none; }
+.map-hex-terrain-texture { pointer-events:none; }
 .map-terrain-icon { fill:var(--terrain-accent); font-size:18px; font-weight:800; paint-order:stroke; stroke:var(--terrain-detail); stroke-width:3px; stroke-opacity:.75; pointer-events:none; text-anchor:middle; }
 .map-hex.has-zone .map-hex-zone { fill:color-mix(in srgb,var(--zone-color) 50%,transparent); }
 .map-hex.zone-viewer-hidden .map-hex-zone { opacity:.75; }

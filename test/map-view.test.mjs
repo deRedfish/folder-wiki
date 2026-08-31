@@ -56,6 +56,7 @@ test("painted terrain renders with its variant name and layer", () => {
   view.render();
 
   assert.match(root.innerHTML, /map-hex-terrain/);
+  assert.match(root.innerHTML, /terrain-textures\/wasteland\.svg/);
   assert.match(root.innerHTML, /Dune desert/);
 });
 
